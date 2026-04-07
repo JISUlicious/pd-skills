@@ -1,10 +1,9 @@
 ---
 name: data-analyst-master
 description: >
-  Master skill for an expert AI data analyst using pandas v2.3.
-  Trigger for any data analysis task, data science question, or when the user
-  asks for help analyzing data, building analysis pipelines, or solving
-  data-related problems. This is the root skill — it references all others.
+  Expert data analyst master skill (pandas v2.3). Use for any data analysis
+  task, EDA, pipeline design, data science question, or when analyzing,
+  exploring, or transforming a dataset.
 ---
 
 # Expert Data Analyst — Master Skill

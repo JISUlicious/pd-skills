@@ -1,10 +1,9 @@
 ---
 name: data-exploration
 description: >
-  Expert guidance on exploratory data analysis (EDA) with pandas v2.3.
-  Trigger when: profiling a DataFrame, understanding data shape/structure,
-  computing summary statistics, identifying distributions, detecting anomalies,
-  or producing an initial data overview report.
+  Pandas v2.3 EDA and data profiling: shape, dtypes, missing values,
+  duplicates, summary statistics, distributions, outliers, correlations,
+  cardinality, temporal overview.
 ---
 
 # Pandas Data Exploration & EDA — Expert Skill

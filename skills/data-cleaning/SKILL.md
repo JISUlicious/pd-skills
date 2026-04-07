@@ -1,10 +1,9 @@
 ---
 name: data-cleaning
 description: >
-  Expert guidance on cleaning and preprocessing data with pandas v2.3.
-  Trigger when: handling missing values, removing duplicates, fixing dtypes,
-  standardizing strings, parsing dates, correcting inconsistent values,
-  filtering bad records, or preparing data for analysis or modeling.
+  Pandas v2.3 data cleaning: missing values, deduplication, dtype conversion,
+  string normalization, date parsing, outlier treatment, inconsistent values,
+  preprocessing for analysis or modeling.
 ---
 
 # Pandas Data Cleaning & Preprocessing — Expert Skill

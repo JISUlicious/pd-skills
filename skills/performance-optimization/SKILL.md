@@ -1,10 +1,9 @@
 ---
 name: performance-optimization
 description: >
-  Expert guidance on pandas v2.3 performance optimization and memory efficiency.
-  Trigger when: DataFrame is slow to process, memory usage is too high,
-  profiling performance, choosing dtypes, using PyArrow backends, optimizing
-  groupby/apply, working with large files, or Copy-on-Write mode.
+  Pandas v2.3 performance and memory: dtype downcasting, PyArrow backend,
+  Copy-on-Write, vectorization vs apply, chunked large-file processing,
+  groupby optimization, ADBC, Parquet.
 ---
 
 # Pandas Performance & Memory Optimization — Expert Skill

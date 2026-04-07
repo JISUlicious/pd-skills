@@ -1,10 +1,9 @@
 ---
 name: visualization
 description: >
-  Expert guidance on data visualization with pandas v2.3 and complementary
-  libraries. Trigger when: plotting DataFrames or Series, creating charts,
-  building dashboards, visualizing distributions, correlations, time series,
-  or producing report-ready figures.
+  Pandas v2.3 visualization: line, bar, histogram, scatter, box plots;
+  Seaborn heatmaps/pairplots; Plotly interactive charts; dashboard layouts;
+  report-quality figure formatting.
 ---
 
 # Pandas Data Visualization — Expert Skill

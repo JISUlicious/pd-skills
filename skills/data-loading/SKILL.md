@@ -1,10 +1,9 @@
 ---
 name: data-loading
 description: >
-  Expert guidance on loading, reading, and writing data with pandas v2.3.
-  Trigger when: reading CSV, Excel, JSON, Parquet, SQL, HDF5, or any file
-  format; writing/exporting data; configuring dtypes on load; handling
-  large files; or using PyArrow/ADBC connectors.
+  Pandas v2.3 IO: read/write CSV, Excel, JSON, Parquet, SQL, HDF5;
+  dtype optimization on load; chunked reading for large files;
+  PyArrow engine; ADBC SQL connectors.
 ---
 
 # Pandas Data Loading & IO — Expert Skill

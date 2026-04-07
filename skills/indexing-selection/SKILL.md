@@ -1,10 +1,9 @@
 ---
 name: indexing-selection
 description: >
-  Expert guidance on indexing, selecting, and filtering data with pandas v2.3.
-  Trigger when: subsetting rows or columns, using loc/iloc, boolean indexing,
-  query expressions, multi-level indexing, conditional selection, or when
-  debugging KeyError / IndexError issues.
+  Pandas v2.3 indexing and selection: loc, iloc, query, boolean indexing,
+  MultiIndex, isin, slicing, SettingWithCopyWarning fixes, KeyError/IndexError
+  debugging.
 ---
 
 # Pandas Indexing & Selection — Expert Skill

@@ -1,10 +1,9 @@
 ---
 name: time-series
 description: >
-  Expert guidance on time series analysis with pandas v2.3.
-  Trigger when: working with dates or timestamps, resampling, rolling windows,
-  lag/lead features, seasonality decomposition, frequency conversion, date
-  arithmetic, DatetimeIndex, period ranges, or timezone handling.
+  Pandas v2.3 time series: DatetimeIndex, resample, rolling/expanding/EWM
+  windows, lag/lead features, date arithmetic, timezone conversion,
+  seasonality decomposition, gap detection.
 ---
 
 # Pandas Time Series Analysis — Expert Skill

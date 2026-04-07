@@ -1,11 +1,9 @@
 ---
 name: advanced-pandas
 description: >
-  Expert guidance on advanced pandas v2.3 features.
-  Trigger when: using MultiIndex, Categorical dtype, Styler/formatting,
-  custom accessors, pandas eval/query optimization, window functions with
-  offsets, pipe(), method chaining, extending pandas, or using nullable
-  extension types (Int64, Float64, boolean, StringDtype).
+  Advanced pandas v2.3: MultiIndex, Categorical dtype, Styler, pipe(),
+  method chaining, eval/query, nullable types (Int64/boolean/string),
+  custom accessors, window offsets, extending pandas.
 ---
 
 # Advanced Pandas v2.3 — Expert Skill

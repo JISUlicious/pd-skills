@@ -1,10 +1,9 @@
 ---
 name: statistical-analysis
 description: >
-  Expert guidance on statistical analysis with pandas v2.3.
-  Trigger when: computing descriptive statistics, correlations, distributions,
-  hypothesis testing support, aggregations, ranking, significance testing,
-  A/B test analysis, cohort analysis, or building statistical summaries.
+  Pandas v2.3 statistical analysis: descriptive stats, correlations,
+  distributions, normality tests, t-test, Mann-Whitney, chi-square,
+  A/B testing, cohort analysis, ranking, percentiles.
 ---
 
 # Pandas Statistical Analysis — Expert Skill
