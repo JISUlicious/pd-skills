@@ -1,11 +1,3 @@
----
-name: data-cleaning
-description: >
-  Pandas v2.3 data cleaning: missing values, deduplication, dtype conversion,
-  string normalization, date parsing, outlier treatment, inconsistent values,
-  preprocessing for analysis or modeling.
----
-
 # Pandas Data Cleaning & Preprocessing — Expert Skill
 
 You are an expert data analyst. Apply the following techniques to clean and

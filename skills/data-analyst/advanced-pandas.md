@@ -1,11 +1,3 @@
----
-name: advanced-pandas
-description: >
-  Advanced pandas v2.3: MultiIndex, Categorical dtype, Styler, pipe(),
-  method chaining, eval/query, nullable types (Int64/boolean/string),
-  custom accessors, window offsets, extending pandas.
----
-
 # Advanced Pandas v2.3 — Expert Skill
 
 You are an expert data analyst. Apply the following advanced techniques for

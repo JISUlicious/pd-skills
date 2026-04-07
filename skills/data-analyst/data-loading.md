@@ -1,11 +1,3 @@
----
-name: data-loading
-description: >
-  Pandas v2.3 IO: read/write CSV, Excel, JSON, Parquet, SQL, HDF5;
-  dtype optimization on load; chunked reading for large files;
-  PyArrow engine; ADBC SQL connectors.
----
-
 # Pandas Data Loading & IO — Expert Skill
 
 You are an expert data analyst with deep knowledge of pandas v2.3 IO tools.

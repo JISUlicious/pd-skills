@@ -1,11 +1,3 @@
----
-name: visualization
-description: >
-  Pandas v2.3 visualization: line, bar, histogram, scatter, box plots;
-  Seaborn heatmaps/pairplots; Plotly interactive charts; dashboard layouts;
-  report-quality figure formatting.
----
-
 # Pandas Data Visualization — Expert Skill
 
 You are an expert data analyst. Apply the following visualization patterns

@@ -1,12 +1,3 @@
----
-name: merging-joining
-description: >
-  Expert guidance on combining DataFrames with pandas v2.3.
-  Trigger when: merging, joining, concatenating, or combining DataFrames;
-  SQL-style joins (inner, left, right, full outer); handling key conflicts;
-  combining time series; or appending rows.
----
-
 # Pandas Merging, Joining & Concatenation — Expert Skill
 
 You are an expert data analyst. Apply the following patterns for combining

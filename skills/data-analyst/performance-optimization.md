@@ -1,11 +1,3 @@
----
-name: performance-optimization
-description: >
-  Pandas v2.3 performance and memory: dtype downcasting, PyArrow backend,
-  Copy-on-Write, vectorization vs apply, chunked large-file processing,
-  groupby optimization, ADBC, Parquet.
----
-
 # Pandas Performance & Memory Optimization — Expert Skill
 
 You are an expert data analyst. Apply these techniques to make pandas code fast

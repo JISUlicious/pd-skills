@@ -1,11 +1,3 @@
----
-name: statistical-analysis
-description: >
-  Pandas v2.3 statistical analysis: descriptive stats, correlations,
-  distributions, normality tests, t-test, Mann-Whitney, chi-square,
-  A/B testing, cohort analysis, ranking, percentiles.
----
-
 # Pandas Statistical Analysis — Expert Skill
 
 You are an expert data analyst. Apply the following statistical techniques

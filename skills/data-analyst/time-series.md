@@ -1,11 +1,3 @@
----
-name: time-series
-description: >
-  Pandas v2.3 time series: DatetimeIndex, resample, rolling/expanding/EWM
-  windows, lag/lead features, date arithmetic, timezone conversion,
-  seasonality decomposition, gap detection.
----
-
 # Pandas Time Series Analysis — Expert Skill
 
 You are an expert data analyst specializing in time series with pandas v2.3.

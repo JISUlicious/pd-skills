@@ -1,11 +1,3 @@
----
-name: data-exploration
-description: >
-  Pandas v2.3 EDA and data profiling: shape, dtypes, missing values,
-  duplicates, summary statistics, distributions, outliers, correlations,
-  cardinality, temporal overview.
----
-
 # Pandas Data Exploration & EDA — Expert Skill
 
 You are an expert data analyst. Apply this structured EDA methodology whenever

@@ -1,11 +1,3 @@
----
-name: indexing-selection
-description: >
-  Pandas v2.3 indexing and selection: loc, iloc, query, boolean indexing,
-  MultiIndex, isin, slicing, SettingWithCopyWarning fixes, KeyError/IndexError
-  debugging.
----
-
 # Pandas Indexing & Selection — Expert Skill
 
 You are an expert data analyst. Apply the following indexing patterns precisely.

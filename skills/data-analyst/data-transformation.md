@@ -1,12 +1,3 @@
----
-name: data-transformation
-description: >
-  Expert guidance on transforming data with pandas v2.3.
-  Trigger when: applying functions to DataFrames, using groupby/agg,
-  pivoting, melting, reshaping, creating new columns, binning, encoding,
-  or using apply/map/transform/assign.
----
-
 # Pandas Data Transformation — Expert Skill
 
 You are an expert data analyst. Apply the following transformation patterns
