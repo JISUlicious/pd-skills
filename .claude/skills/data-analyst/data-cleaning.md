@@ -1,7 +1,7 @@
 # Pandas Data Cleaning & Preprocessing — Expert Skill
 
 You are an expert data analyst. Apply the following techniques to clean and
-prepare DataFrames using pandas v2.3 best practices.
+prepare DataFrames using pandas >= 2.3 best practices.
 
 ## Missing Value Handling
 
@@ -15,29 +15,29 @@ df[df["col"].isnull()]               # rows where col is NaN
 ### Dropping
 ```python
 # Drop rows where ALL values are NaN
-df.dropna(how="all", inplace=True)
+df = df.dropna(how="all")
 
 # Drop rows missing any value in critical columns
-df.dropna(subset=["user_id", "timestamp"], inplace=True)
+df = df.dropna(subset=["user_id", "timestamp"])
 
 # Drop columns where > 50% is missing
 threshold = len(df) * 0.5
-df.dropna(axis=1, thresh=int(threshold), inplace=True)
+df = df.dropna(axis=1, thresh=int(threshold))
 ```
 
 ### Filling
 ```python
 # Constant fill
-df["status"].fillna("unknown", inplace=True)
+df["status"] = df["status"].fillna("unknown")
 
 # Statistical fill (per-column)
-df["amount"].fillna(df["amount"].median(), inplace=True)
-df["score"].fillna(df["score"].mean(), inplace=True)
+df["amount"] = df["amount"].fillna(df["amount"].median())
+df["score"] = df["score"].fillna(df["score"].mean())
 
 # Forward / backward fill (time-ordered data)
 df = df.sort_values("timestamp")
-df["price"].ffill(inplace=True)          # propagate last valid value forward
-df["price"].bfill(inplace=True)          # propagate next valid value backward
+df["price"] = df["price"].ffill()        # propagate last valid value forward
+df["price"] = df["price"].bfill()        # propagate next valid value backward
 
 # Group-wise fill (e.g. fill with group median)
 df["amount"] = df.groupby("category")["amount"].transform(
@@ -48,11 +48,11 @@ df["amount"] = df.groupby("category")["amount"].transform(
 ### Interpolation
 ```python
 # Linear interpolation (good for evenly-spaced time series)
-df["sensor"].interpolate(method="linear", inplace=True)
+df["sensor"] = df["sensor"].interpolate(method="linear")
 
 # Time-aware interpolation
 df = df.set_index("timestamp")
-df["sensor"].interpolate(method="time", inplace=True)
+df["sensor"] = df["sensor"].interpolate(method="time")
 
 # Other methods: "polynomial", "spline", "pchip", "akima"
 ```
@@ -61,10 +61,10 @@ df["sensor"].interpolate(method="time", inplace=True)
 
 ```python
 # Remove exact duplicates (keep first occurrence)
-df.drop_duplicates(inplace=True)
+df = df.drop_duplicates()
 
 # Remove duplicates on key columns
-df.drop_duplicates(subset=["user_id", "date"], keep="last", inplace=True)
+df = df.drop_duplicates(subset=["user_id", "date"], keep="last")
 
 # Keep all duplicates for inspection
 dupes = df[df.duplicated(subset=["user_id"], keep=False)]
@@ -87,7 +87,6 @@ df["name"] = df["name"].astype("string")                    # Arrow-backed strin
 
 # Datetime
 df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d", errors="coerce")
-df["date"] = pd.to_datetime(df["date"], infer_datetime_format=True)
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")  # Unix timestamp
 
 # Validate conversion succeeded
@@ -186,14 +185,14 @@ df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
 
 ```python
 # Rename specific columns
-df.rename(columns={"qty": "quantity", "amt": "amount"}, inplace=True)
+df = df.rename(columns={"qty": "quantity", "amt": "amount"})
 
 # Normalize all column names (snake_case)
 import re
 df.columns = [re.sub(r"\W+", "_", c).strip("_").lower() for c in df.columns]
 
 # Drop useless columns
-df.drop(columns=["unnamed_0", "redundant_col"], inplace=True, errors="ignore")
+df = df.drop(columns=["unnamed_0", "redundant_col"], errors="ignore")
 
 # Reorder columns
 priority_cols = ["id", "user_id", "timestamp"]
@@ -216,20 +215,21 @@ df = pd.concat([df, dummies], axis=1)
 from sklearn.preprocessing import OrdinalEncoder, LabelEncoder
 ```
 
-## Copy-on-Write (pandas 2.x+)
+## Copy-on-Write
 
-In pandas 2.x, Copy-on-Write (CoW) may be enabled. To avoid warnings:
+CoW is always enabled in pandas >= 3.0 (opt-in in 2.x). Key implications:
+- **Never use `inplace=True`** — use assignment instead
+- Method chaining is fully safe and preferred
+- Slices return views that copy on mutation (predictable behavior)
+
 ```python
-# PREFERRED: Method chaining (no inplace needed with CoW)
+# PREFERRED: Method chaining
 df = (df
     .dropna(subset=["id"])
     .drop_duplicates()
     .assign(amount=lambda x: x["amount"].fillna(0))
     .reset_index(drop=True)
 )
-
-# Enable CoW explicitly (default in pandas 3.0)
-pd.options.mode.copy_on_write = True
 ```
 
 ## Cleaning Pipeline Template

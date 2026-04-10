@@ -1,7 +1,7 @@
 # Pandas Data Transformation — Expert Skill
 
 You are an expert data analyst. Apply the following transformation patterns
-using pandas v2.3 best practices. Prefer vectorized operations over loops.
+using pandas >= 2.3 best practices. Prefer vectorized operations over loops.
 
 ## Creating and Modifying Columns
 
@@ -64,7 +64,7 @@ df["doubled"] = df["value"].map(lambda x: x * 2)
 
 # replace: substitute values (more flexible than map, preserves unmapped)
 df["region"] = df["region"].replace({"USA": "US", "U.S.A": "US", "United States": "US"})
-df.replace({"status": {"Active": "active", "Inactive": "inactive"}}, inplace=True)
+df = df.replace({"status": {"Active": "active", "Inactive": "inactive"}})
 ```
 
 ## apply() — Row or Column Level
@@ -186,13 +186,13 @@ df["tier"] = pd.cut(df["revenue"], bins=bins, labels=["Low", "Medium", "High", "
 
 ```python
 # Sort by single column
-df.sort_values("revenue", ascending=False, inplace=True)
+df = df.sort_values("revenue", ascending=False)
 
 # Sort by multiple columns (multi-key)
-df.sort_values(["region", "revenue"], ascending=[True, False], inplace=True)
+df = df.sort_values(["region", "revenue"], ascending=[True, False])
 
 # Sort index
-df.sort_index(inplace=True)
+df = df.sort_index()
 
 # Stable sort (preserves original order for ties)
 df.sort_values("score", kind="mergesort")

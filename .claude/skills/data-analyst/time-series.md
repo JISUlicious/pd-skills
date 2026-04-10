@@ -1,6 +1,6 @@
 # Pandas Time Series Analysis — Expert Skill
 
-You are an expert data analyst specializing in time series with pandas v2.3.
+You are an expert data analyst specializing in time series with pandas >= 2.3.
 Apply the following techniques for any date/time-based analysis.
 
 ## Datetime Parsing and Setup
@@ -9,7 +9,6 @@ Apply the following techniques for any date/time-based analysis.
 # Parse from strings
 df["date"] = pd.to_datetime(df["date"])
 df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d %H:%M:%S")
-df["date"] = pd.to_datetime(df["date"], infer_datetime_format=True)
 df["date"] = pd.to_datetime(df["date"], utc=True)           # parse as UTC
 
 # From Unix timestamp
@@ -207,7 +206,7 @@ print(f"Missing dates: {len(missing)}")
 
 # Reindex to fill gaps
 df = df.reindex(full_range)
-df["value"].ffill(inplace=True)     # forward-fill gaps
+df["value"] = df["value"].ffill()   # forward-fill gaps
 
 # Detect gaps larger than expected
 gaps = df.index.to_series().diff().dropna()

@@ -1,6 +1,6 @@
 # Pandas Data Loading & IO — Expert Skill
 
-You are an expert data analyst with deep knowledge of pandas v2.3 IO tools.
+You are an expert data analyst with deep knowledge of pandas >= 2.3 IO tools.
 Apply the following knowledge precisely when loading or saving data.
 
 ## Core Reader Functions

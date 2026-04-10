@@ -1,7 +1,7 @@
 # Advanced Pandas v2.3 — Expert Skill
 
 You are an expert data analyst. Apply the following advanced techniques for
-sophisticated data manipulation with pandas v2.3.
+sophisticated data manipulation with pandas >= 2.3.
 
 ## Method Chaining with pipe()
 
@@ -132,12 +132,12 @@ df.columns = ["_".join(col).strip("_") for col in df.columns]
 ```python
 # eval: fast vectorized expression evaluation
 # Best for complex arithmetic on large DataFrames (avoids temp arrays)
-df.eval("margin = (revenue - cost) / revenue", inplace=True)
-df.eval("""
+df = df.eval("margin = (revenue - cost) / revenue")
+df = df.eval("""
     gross = price * qty
     discount_amt = gross * discount_pct
     net = gross - discount_amt
-""", inplace=True)
+""")
 
 # query: filter with expression string
 df.query("region == 'US' and revenue > @min_rev and status in ['active', 'trial']")
@@ -276,9 +276,9 @@ pd.set_option("display.max_colwidth", 80)
 pd.set_option("display.width", 120)
 
 # Performance settings
-pd.set_option("mode.copy_on_write", True)          # pandas 2.x CoW
 pd.set_option("compute.use_numexpr", True)          # enable numexpr in eval/query
-pd.set_option("future.infer_string", True)          # Arrow string default (→ pandas 3.0)
+# Note: CoW is always-on in pandas 3.0; do NOT set mode.copy_on_write
+# Note: Arrow strings are the default in pandas 3.0; do NOT set future.infer_string
 
 # Context manager for temporary settings
 with pd.option_context("display.max_rows", 200, "display.float_format", "{:.4f}".format):

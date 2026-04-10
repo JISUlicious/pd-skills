@@ -1,0 +1,6 @@
+.claude/projects/
+data/
+*.zip
+*.png
+.venv/
+__pycache__/

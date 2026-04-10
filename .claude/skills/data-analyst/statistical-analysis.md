@@ -1,7 +1,7 @@
 # Pandas Statistical Analysis — Expert Skill
 
 You are an expert data analyst. Apply the following statistical techniques
-precisely using pandas v2.3 and scipy/numpy where needed.
+precisely using pandas >= 2.3 and scipy/numpy where needed.
 
 ## Descriptive Statistics
 

@@ -1,7 +1,7 @@
 # Pandas Performance & Memory Optimization — Expert Skill
 
 You are an expert data analyst. Apply these techniques to make pandas code fast
-and memory-efficient with pandas v2.3.
+and memory-efficient with pandas >= 2.3.
 
 ## Step 1 — Profile First, Optimize Second
 
@@ -39,7 +39,7 @@ def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], downcast="integer")
     for col in df.select_dtypes(include=["float64"]).columns:
         df[col] = pd.to_numeric(df[col], downcast="float")
-    for col in df.select_dtypes(include=["object"]).columns:
+    for col in df.select_dtypes(include=["object", "str"]).columns:
         if df[col].nunique() / len(df) < 0.5:
             df[col] = df[col].astype("category")
     return df
@@ -120,25 +120,24 @@ def custom_calc(x, y, z):
 df["result"] = custom_calc(df["a"].values, df["b"].values, df["c"].values)
 ```
 
-## Step 5 — Copy-on-Write (pandas 2.x)
+## Step 5 — Copy-on-Write
+
+CoW is always enabled in pandas >= 3.0 (opt-in in 2.x). Do **not** set
+`pd.options.mode.copy_on_write = True` — it raises a warning in pandas 3.0.
 
 ```python
-# Enable CoW (will be default in pandas 3.0)
-pd.options.mode.copy_on_write = True
-
-# With CoW, views don't copy data until mutation
-# Method chaining is fully safe
+# CoW means views copy on mutation — behavior is always predictable
+# Method chaining is fully safe and memory-efficient
 result = (df
     .query("status == 'active'")
     .assign(revenue=lambda x: x["price"] * x["qty"])
     .groupby("region")["revenue"]
     .sum()
 )
-# No unexpected copies; memory use is optimal
-```
 
-Without CoW: `df[condition]` returns a view. Mutating it may or may not
-update `df`. With CoW: behavior is explicit and predictable.
+# NEVER use inplace=True — it is deprecated in pandas 3.0
+# Use assignment instead: df = df.dropna()
+```
 
 ## Step 6 — Large File Handling
 
@@ -248,6 +247,6 @@ with adbc.connect("postgresql://user:pw@host/db") as conn:
 - [ ] Convert `object` string columns with < 50% unique → `category`
 - [ ] Load only needed columns with `usecols=`
 - [ ] Use `dtype=` on `read_csv()` to avoid object fallback
-- [ ] Enable CoW or use method chaining to avoid copies
+- [ ] Use method chaining to avoid copies (CoW is always-on in pandas 3.0)
 - [ ] Use Parquet instead of CSV for repeated analysis
 - [ ] Process large files in chunks

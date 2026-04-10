@@ -171,10 +171,10 @@ subset = df[df["status"] == "active"].copy()
 subset["score"] = 100   # safe: separate object
 ```
 
-With **Copy-on-Write** enabled (pandas 2.x opt-in, default in 3.0):
+**Copy-on-Write** is always enabled in pandas >= 3.0 (opt-in in 2.x):
 ```python
-pd.options.mode.copy_on_write = True
 # All indexing operations return CoW views; chained writes raise errors explicitly
+# Do NOT set pd.options.mode.copy_on_write — it's deprecated in pandas 3.0
 ```
 
 ## Sampling & Head/Tail

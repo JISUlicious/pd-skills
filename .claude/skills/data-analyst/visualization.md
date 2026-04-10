@@ -1,7 +1,7 @@
 # Pandas Data Visualization — Expert Skill
 
 You are an expert data analyst. Apply the following visualization patterns
-using pandas v2.3's built-in plotting and complementary libraries.
+using pandas >= 2.3 built-in plotting and complementary libraries.
 
 ## Pandas Built-in Plotting
 
@@ -137,11 +137,11 @@ plt.show()
 # Distribution by group
 fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 sns.histplot(data=df, x="revenue", hue="segment", kde=True, ax=axes[0])
-sns.boxplot(data=df, x="segment", y="revenue", ax=axes[1])
+sns.boxplot(data=df, x="segment", y="revenue", hue="segment", legend=False, ax=axes[1])
 plt.tight_layout(); plt.show()
 
 # Violin plot (shows full distribution)
-sns.violinplot(data=df, x="region", y="revenue", inner="quartile")
+sns.violinplot(data=df, x="region", y="revenue", hue="region", legend=False, inner="quartile")
 
 # Bar plot with confidence intervals
 sns.barplot(data=df, x="segment", y="revenue", estimator="mean", errorbar="ci")
