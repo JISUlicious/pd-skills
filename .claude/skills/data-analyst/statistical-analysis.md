@@ -167,6 +167,43 @@ h_stat, p_value = stats.kruskal(*groups)
 print(f"Kruskal-Wallis: H={h_stat:.3f}, p={p_value:.4f}")
 ```
 
+### Categorical × Numeric Screen (Kruskal-Wallis across all pairs)
+
+When you want to quickly learn **which categorical columns actually explain
+variation in numeric columns** — and conversely, which categoricals are
+effectively noise — run a Kruskal-Wallis across every (categorical, numeric)
+pair. Non-parametric, robust to non-normal or clipped distributions, and
+cheap on millions of rows.
+
+```python
+from scipy import stats
+
+cat_cols = df.select_dtypes(include=["category", "object", "str"]).columns
+num_cols = df.select_dtypes(include="number").columns
+
+rows = []
+for cat in cat_cols:
+    if df[cat].nunique() < 2 or df[cat].nunique() > 50:
+        continue
+    for num in num_cols:
+        groups = [g[num].dropna().values
+                  for _, g in df.groupby(cat, observed=True)]
+        if sum(len(g) > 0 for g in groups) < 2:
+            continue
+        h, p = stats.kruskal(*groups)
+        rows.append((cat, num, h, p))
+
+screen = (pd.DataFrame(rows, columns=["cat", "num", "H", "p"])
+            .sort_values("p"))
+print("Significant (p < 0.01):")
+print(screen.query("p < 0.01").to_string(index=False))
+
+# Categoricals that don't separate any numeric column — likely noise/bookkeeping
+uninformative = (screen.groupby("cat")["p"].min()
+                 .loc[lambda s: s > 0.05].index.tolist())
+print(f"\nCategoricals with no significant effect on any numeric: {uninformative}")
+```
+
 ## A/B Test Analysis
 
 ```python

@@ -76,41 +76,27 @@ df.duplicated(subset=["user_id", "date"]).sum()
 df[df.duplicated(keep=False)].sort_values(["user_id", "date"])
 ```
 
-## Step 3.5 — Data Provenance Check (Synthetic Data Detection)
+## Step 3.5 — Data-Quality Signature
 
-Before diving into analysis, sanity-check whether the data looks **real** or
-**synthetic/simulated**. Flag as likely synthetic if **3 or more** of these
-are true:
-
-- Zero missing values across all columns
-- Zero duplicate rows
-- Numeric columns have suspiciously round min/max bounds (e.g., exactly 0–100)
-- Continuous columns have cardinality == row count (every value unique)
-- Distributions are perfectly uniform or perfectly normal
-- No date/timestamp column (real-world surveys/transactions almost always have one)
-- Categorical columns have suspiciously balanced class frequencies
+Report a neutral readout of quality signals. These are **informative**, not a
+binary synthetic-or-real verdict: well-curated real datasets (cleaned research
+data, fact tables, feature stores) can hit several of these. When multiple
+indicators fire, just verify provenance before generalizing conclusions.
 
 ```python
-flags = []
-if df.isnull().sum().sum() == 0:
-    flags.append("zero missing values")
-if df.duplicated().sum() == 0:
-    flags.append("zero duplicates")
 num = df.select_dtypes(include="number")
-if len(num) and ((num.min() % 1 == 0).all() and (num.max() % 1 == 0).all()):
-    flags.append("round numeric bounds")
-if any(df[c].nunique() == len(df) for c in num.columns):
-    flags.append("continuous column with unique-per-row values")
-if not len(df.select_dtypes(include=["datetime64", "datetimetz"]).columns):
-    flags.append("no datetime column")
-
-if len(flags) >= 3:
-    print(f"⚠️  LIKELY SYNTHETIC DATA — flags: {flags}")
-    print("   Statistical inferences may not generalize to real populations.")
+indicators = {
+    "no missing values":       df.isnull().sum().sum() == 0,
+    "no duplicates":           df.duplicated().sum() == 0,
+    "no datetime column":      len(df.select_dtypes(include=["datetime64","datetimetz"]).columns) == 0,
+    "integer-bounded numerics": len(num.columns) > 0 and (num.min() % 1 == 0).all() and (num.max() % 1 == 0).all(),
+    "unique-per-row numerics": any(df[c].nunique() == len(df) for c in num.columns),
+}
+for key, val in indicators.items():
+    print(f"  [{'x' if val else ' '}] {key}")
+if sum(indicators.values()) >= 3:
+    print("  → Verify provenance before generalizing statistical conclusions.")
 ```
-
-If flagged: **report this prominently in your findings**. Statistical tests
-and model results on synthetic data do not transfer to real populations.
 
 ## Step 4 — Descriptive Statistics
 
@@ -137,56 +123,132 @@ for col in df.select_dtypes(include=["object", "str", "category"]).columns:
 
 ## Step 5 — Distribution Analysis
 
+### Step 5a — Point-mass / clipping detection (run BEFORE outlier checks)
+
+Many real columns — revenue (non-purchasers), counts, time-censored values,
+bounded surveys — have large fractions of rows pinned at min or max. On these
+columns **IQR and moment-based outlier stats are misleading** (they flag the
+right tail of a truncated distribution as "outliers"). Always check for point
+masses first and skip IQR where present.
+
+```python
+numeric_cols = df.select_dtypes(include="number").columns
+point_mass = {}
+for col in numeric_cols:
+    vmin, vmax = df[col].min(), df[col].max()
+    at_min = (df[col] == vmin).mean()
+    at_max = (df[col] == vmax).mean()
+    if at_min > 0.01 or at_max > 0.01:
+        point_mass[col] = {"at_min": at_min, "at_max": at_max}
+        print(f"  {col}: {at_min:.1%} at min({vmin:.3g}), "
+              f"{at_max:.1%} at max({vmax:.3g})")
+```
+
+### Step 5b — Skew & kurtosis
+
 ```python
 import numpy as np
+dist = pd.DataFrame({
+    "skew": df[numeric_cols].skew(),
+    "kurt": df[numeric_cols].kurt(),
+})
+print(dist.sort_values("skew", key=lambda s: s.abs(), ascending=False).round(3))
+```
 
-# Skewness & kurtosis for all numeric columns
-numeric_cols = df.select_dtypes(include="number").columns
-print(df[numeric_cols].skew().sort_values())
-print(df[numeric_cols].kurt().sort_values())
+### Step 5c — IQR outliers (skipping point-mass columns)
 
-# Outlier detection via IQR
-def iqr_bounds(series):
-    q1, q3 = series.quantile([0.25, 0.75])
+```python
+def iqr_bounds(s):
+    q1, q3 = s.quantile([0.25, 0.75])
     iqr = q3 - q1
     return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
 for col in numeric_cols:
+    if col in point_mass:
+        continue   # IQR misleading on clipped distributions
     lo, hi = iqr_bounds(df[col])
     n_out = ((df[col] < lo) | (df[col] > hi)).sum()
-    if n_out > 0:
+    if n_out:
         print(f"{col}: {n_out} outliers (IQR method)")
 
-# Z-score outliers
+# Z-score outliers (same caveat — skip point-mass columns)
 from scipy import stats
-z_scores = np.abs(stats.zscore(df[numeric_cols].dropna()))
-outlier_mask = (z_scores > 3).any(axis=1)
-print(f"Rows with |z| > 3 in any column: {outlier_mask.sum()}")
+ok_cols = [c for c in numeric_cols if c not in point_mass]
+z = np.abs(stats.zscore(df[ok_cols].dropna()))
+print(f"Rows with |z| > 3 in any non-clipped column: {(z > 3).any(axis=1).sum()}")
 ```
+
+For distribution-shape testing (Shapiro, KS, D'Agostino-Pearson), see
+`statistical-analysis.md`.
 
 ## Step 6 — Correlation Analysis
 
+**Prefer Spearman by default** for EDA. It's rank-based, so it handles
+skewed, clipped, or zero-inflated columns without distortion. Use Pearson
+only when you have evidence the relationships are linear.
+
 ```python
-# Pearson correlation matrix
-corr = df[numeric_cols].corr()
-
-# High correlations (> 0.8, excluding diagonal)
-high_corr = (corr.abs()
-    .where(np.triu(np.ones(corr.shape), k=1).astype(bool))
-    .stack()
+# Spearman pairs with |rho| > 0.3
+corr = df[numeric_cols].corr(method="spearman")
+mask = np.triu(np.ones(corr.shape), k=1).astype(bool)
+pairs = (corr.where(mask).stack()
     .reset_index()
-    .rename(columns={"level_0": "col_a", "level_1": "col_b", 0: "corr"})
-    .query("corr > 0.8")
-    .sort_values("corr", ascending=False)
+    .rename(columns={"level_0": "a", "level_1": "b", 0: "rho"}))
+strong = pairs.loc[pairs["rho"].abs() > 0.3].sort_values(
+    "rho", key=lambda s: s.abs(), ascending=False
 )
-print(high_corr)
+print(strong.round(3))
 
-# Spearman (rank-based, handles non-linear)
-df[numeric_cols].corr(method="spearman")
-
-# Correlation with a target variable
-df[numeric_cols].corrwith(df["target"]).sort_values()
+# Correlation with a target variable (when the user specified one)
+df[numeric_cols].corrwith(df["target"], method="spearman").sort_values()
 ```
+
+### Uncorrelated columns (neutral report)
+
+Columns that show |ρ| < 0.05 against **every** other numeric column deserve a
+second look. They may be IDs, independent factors, the target itself, or
+noise. Report them — do **not** auto-drop.
+
+```python
+self_masked = corr.abs().where(~np.eye(len(corr), dtype=bool))
+loners = self_masked.max()[self_masked.max() < 0.05].index.tolist()
+if loners:
+    print(f"Uncorrelated with all others: {loners}")
+    print("  → verify whether these are IDs, independent factors, or targets")
+```
+
+## Step 6.5 — Derived-Column / Target-Leakage Check
+
+A categorical column that is strictly a function of some numeric column is a
+common form of **target leakage** in supervised pipelines — and a common
+source of silly model-accuracy claims. Detect it by binning each numeric
+column to match the categorical's cardinality and measuring row-level purity
+of the resulting cross-tab.
+
+```python
+cat_cols = df.select_dtypes(include=["category", "object", "str"]).columns
+derived = []
+for cat in cat_cols:
+    card = df[cat].nunique()
+    if card < 2 or card > 20:
+        continue
+    for nc in numeric_cols:
+        try:
+            bins = pd.qcut(df[nc], q=card, labels=False, duplicates="drop")
+        except ValueError:
+            continue
+        purity = (pd.crosstab(bins, df[cat], normalize="index")
+                  .max(axis=1).mean())
+        if purity > 0.90:
+            derived.append((cat, nc, round(float(purity), 3)))
+
+for cat, nc, p in sorted(derived, key=lambda x: -x[2]):
+    print(f"  {cat} ≈ f({nc})   row-purity={p}")
+```
+
+If any pair shows row-purity > 0.9, flag it: the categorical is (nearly) a
+deterministic function of the numeric — do not use it as a feature alongside
+the numeric when predicting anything downstream of that numeric.
 
 ## Step 7 — Temporal Overview (if dates present)
 
@@ -245,15 +307,29 @@ print(f"Memory: {mem_before:.1f} MB → {mem_after:.1f} MB "
       f"({(1 - mem_after/mem_before):.0%} reduction)")
 ```
 
-## Step 9 — Quick EDA Report (one-liner)
+## Step 9 — One-Shot EDA Helper
+
+The skill ships a runnable helper at `eda.py` (same directory as this file)
+that executes every step above in order, guards IQR on point-mass columns,
+runs Spearman correlations, performs the derived-column check, and returns
+a `findings` dict plus a printed checklist. **Prefer this over cherry-picking
+steps by hand** — it prevents the "forgot to run outliers" failure mode.
 
 ```python
-# Using ydata-profiling (formerly pandas-profiling)
-# pip install ydata-profiling
-from ydata_profiling import ProfileReport
-profile = ProfileReport(df, title="EDA Report", explorative=True)
-profile.to_file("eda_report.html")
+# Library usage
+from eda import eda_report
+findings = eda_report(df, target="burnout_score")   # target is optional
+
+# CLI usage (two-pass load with automatic category inference)
+#   python eda.py data/file.csv [target_column]
 ```
+
+Ask the user for the target column when it isn't obvious. Do **not** guess
+it from column names — domain-specific targets (`conversion`, `churned`,
+`nps`) defeat name heuristics and guessing wastes a pass.
+
+For an HTML report with histograms, the optional `ydata-profiling` library
+still works: `ProfileReport(df).to_file("eda.html")`.
 
 ## Pandas Built-in Plotting for EDA
 
@@ -275,15 +351,30 @@ df[numeric_cols].plot(kind="box", subplots=True, figsize=(14, 6))
 df["category"].value_counts().plot(kind="bar")
 ```
 
-## EDA Checklist
+## EDA Checklist (Runnable)
 
-- [ ] Shape, memory, dtypes confirmed
-- [ ] Missing values quantified per column
-- [ ] Duplicate rows detected
-- [ ] Summary statistics reviewed (mean, median, std, quartiles)
-- [ ] Outliers identified (IQR or Z-score)
-- [ ] Skewness / kurtosis noted for modeling considerations
-- [ ] Correlations above 0.8 flagged
-- [ ] Cardinality checked (constants and ID-like columns)
-- [ ] Date range and coverage verified
-- [ ] Target variable distribution examined (if supervised task)
+Call `eda_report(df, target=...)` and it returns a `findings["checklist"]`
+dict. For manual runs, verify every item yourself before handing results
+back to the user:
+
+```python
+def eda_checklist(findings: dict) -> list[str]:
+    """Return the list of unchecked items from an eda_report findings dict."""
+    return [k for k, v in findings["checklist"].items() if not v]
+
+unchecked = eda_checklist(findings)
+assert not unchecked, f"EDA incomplete: {unchecked}"
+```
+
+The checklist items enforced by `eda_report`:
+
+- Shape / memory / dtypes reported
+- Missing values quantified per column
+- Duplicate rows counted
+- Descriptive stats for numeric columns
+- **Point-mass columns reported (before outlier detection)**
+- Outliers reported (IQR, skipping point-mass columns)
+- Skew / kurtosis reported
+- Pairwise Spearman correlations > 0.3 reported
+- Cardinality checked (constants and ID-like columns)
+- Target variable analyzed (if one was provided)
