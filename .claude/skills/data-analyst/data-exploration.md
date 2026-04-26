@@ -307,21 +307,48 @@ print(f"Memory: {mem_before:.1f} MB → {mem_after:.1f} MB "
       f"({(1 - mem_after/mem_before):.0%} reduction)")
 ```
 
-## Step 9 — One-Shot EDA Helper
+## Step 9 — Generating a One-Shot EDA Script
 
-The skill ships a runnable helper at `eda.py` (same directory as this file)
-that executes every step above in order, guards IQR on point-mass columns,
-runs Spearman correlations, performs the derived-column check, and returns
-a `findings` dict plus a printed checklist. **Prefer this over cherry-picking
-steps by hand** — it prevents the "forgot to run outliers" failure mode.
+When facing a new dataset, **generate a tailored EDA script** that runs
+every step above in order. Do not cherry-pick steps; the most common
+failure mode is forgetting to check for point masses before computing
+outliers, or forgetting to validate the target distribution.
+
+A reusable template:
 
 ```python
-# Library usage
-from eda import eda_report
-findings = eda_report(df, target="burnout_score")   # target is optional
+def eda_report(df: pd.DataFrame, target: str | None = None) -> dict:
+    """Run the full EDA workflow above. Returns dict with shape, memory,
+    missing_cols, duplicates, point_mass, iqr_outliers, spearman_pairs,
+    cardinality, target_analysis, and a checklist of completed steps."""
+    findings = {}
+    # 1. Structure (Step 1)
+    findings["shape"] = df.shape
+    findings["memory_mb"] = df.memory_usage(deep=True).sum() / 1e6
+    # 2. Missing (Step 2) — store columns with > 0 nulls
+    findings["missing_cols"] = df.columns[df.isnull().any()].tolist()
+    # 3. Duplicates (Step 3)
+    findings["duplicates"] = int(df.duplicated().sum())
+    # 3.5. Quality signature (Step 3.5)
+    # 4. describe() (Step 4)
+    # 5a. Point-mass detection (CRITICAL — must run before 5c)
+    # 5b. Skew/kurtosis (Step 5b)
+    # 5c. IQR outliers (Step 5c — skip point_mass columns!)
+    # 6. Spearman correlations > 0.3 (Step 6)
+    # 6.5. Derived-column check (Step 6.5)
+    # 7. Temporal overview if datetime present (Step 7)
+    # 8. Cardinality + ID detection (Step 8)
+    # Target-specific analysis when provided
+    if target and target in df.columns:
+        findings["target_corr"] = (
+            df.select_dtypes("number")
+              .corrwith(df[target], method="spearman")
+              .sort_values(key=abs, ascending=False)
+        )
+    findings["checklist"] = {...}        # boolean per step
+    return findings
 
-# CLI usage (two-pass load with automatic category inference)
-#   python eda.py data/file.csv [target_column]
+findings = eda_report(df, target="my_target_column")
 ```
 
 Ask the user for the target column when it isn't obvious. Do **not** guess
@@ -351,30 +378,22 @@ df[numeric_cols].plot(kind="box", subplots=True, figsize=(14, 6))
 df["category"].value_counts().plot(kind="bar")
 ```
 
-## EDA Checklist (Runnable)
+## EDA Checklist
 
-Call `eda_report(df, target=...)` and it returns a `findings["checklist"]`
-dict. For manual runs, verify every item yourself before handing results
-back to the user:
+Whether you ran each step manually or via a generated `eda_report`, verify
+every item below before handing results back to the user. The most common
+EDA failure modes are skipping the point-mass check (which makes IQR
+outliers misleading) and forgetting to analyze the target's distribution.
 
-```python
-def eda_checklist(findings: dict) -> list[str]:
-    """Return the list of unchecked items from an eda_report findings dict."""
-    return [k for k, v in findings["checklist"].items() if not v]
+- [ ] Shape / memory / dtypes reported
+- [ ] Missing values quantified per column
+- [ ] Duplicate rows counted
+- [ ] Descriptive stats for numeric columns
+- [ ] **Point-mass columns reported (before outlier detection)**
+- [ ] Outliers reported (IQR, skipping point-mass columns)
+- [ ] Skew / kurtosis reported
+- [ ] Pairwise Spearman correlations > 0.3 reported
+- [ ] Cardinality checked (constants and ID-like columns)
+- [ ] Target variable analyzed (if one was provided)
 
-unchecked = eda_checklist(findings)
-assert not unchecked, f"EDA incomplete: {unchecked}"
-```
-
-The checklist items enforced by `eda_report`:
-
-- Shape / memory / dtypes reported
-- Missing values quantified per column
-- Duplicate rows counted
-- Descriptive stats for numeric columns
-- **Point-mass columns reported (before outlier detection)**
-- Outliers reported (IQR, skipping point-mass columns)
-- Skew / kurtosis reported
-- Pairwise Spearman correlations > 0.3 reported
-- Cardinality checked (constants and ID-like columns)
-- Target variable analyzed (if one was provided)
+If any item isn't checked, return to that step before reporting findings.
