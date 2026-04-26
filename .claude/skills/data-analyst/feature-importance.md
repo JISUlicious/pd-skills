@@ -1,0 +1,378 @@
+# Feature Importance & SHAP — Expert Skill
+
+You are an expert data analyst. Apply the following methodology when linear
+analysis (Spearman ρ, standardized OLS β + ΔR²) is insufficient and you need
+**non-linear importance**, **interaction detection**, or **per-row
+explanation** of a target variable.
+
+This file is a **complement** to `statistical-analysis.md`, not a
+replacement. Always run linear analysis first — it is faster, more
+interpretable, and often sufficient. Escalate to ML importance only when
+the conditions below are met.
+
+## When to Escalate
+
+Escalate from linear → tree-based importance when **any** of these hold:
+
+| Trigger | Why linear is inadequate |
+|---|---|
+| Linear-model R² < 0.4 with all plausible factors included | Non-linear or interaction effects are dominant |
+| Residual plot vs. a predictor shows curvature, U-shape, or discontinuity | Linear β collapses non-linear signal into a single slope |
+| Domain reason to suspect interactions (e.g. "X matters more when Y is high") | Additive linear models cannot represent interactions |
+| Stakeholder asks "why is *this individual* high/low?" | β is population-level; SHAP is per-row |
+| Predictors are heavily skewed, zero-inflated, or clipped | OLS coefficient inference is biased; trees are robust |
+| Spearman ρ ranking and standardized β ranking disagree | The two views need a third lens to arbitrate |
+
+If none of these hold, **stop and report the linear result** — adding ML
+adds dependency cost and interpretation overhead with no insight gain.
+
+## Setup — Optional Dependencies
+
+`xgboost`, `shap`, and `scikit-learn` are not part of the base
+data-analyst environment. Always guard imports and provide a fallback
+message. **Catch `Exception`, not just `ImportError`** — xgboost on macOS
+raises `XGBoostError` at import time when `libomp` is missing, which is
+not an `ImportError`:
+
+```python
+try:
+    import xgboost as xgb
+    import shap
+    from sklearn.model_selection import train_test_split
+    from sklearn.inspection import permutation_importance
+    from sklearn.metrics import r2_score, mean_absolute_error
+    HAS_ML = True
+except Exception as e:
+    HAS_ML = False
+    print(f"ML stack unavailable ({type(e).__name__}: {e}).")
+    print("Install with: uv pip install xgboost shap scikit-learn")
+    print("On macOS, xgboost also needs OpenMP: brew install libomp")
+```
+
+If `HAS_ML` is False, fall back to the linear analysis from
+`statistical-analysis.md` and tell the user explicitly that the ML
+cross-check was skipped.
+
+## XGBoost Baseline Recipe
+
+Use sensible defaults — do not hyperparameter-tune unless explicitly
+asked. The goal is feature importance, not a production model.
+
+### Regression target
+
+```python
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score, mean_absolute_error
+
+# X: numeric features only (encode categoricals first — see below)
+# y: numeric target
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+model = xgb.XGBRegressor(
+    n_estimators=400,
+    max_depth=6,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    reg_lambda=1.0,
+    random_state=42,
+    tree_method="hist",      # fast on large data
+    n_jobs=-1,
+)
+model.fit(
+    X_train, y_train,
+    eval_set=[(X_test, y_test)],
+    verbose=False,
+)
+
+pred = model.predict(X_test)
+print(f"R²  on holdout: {r2_score(y_test, pred):.4f}")
+print(f"MAE on holdout: {mean_absolute_error(y_test, pred):.4f}")
+```
+
+### Binary classification target
+
+```python
+model = xgb.XGBClassifier(
+    n_estimators=400,
+    max_depth=6,
+    learning_rate=0.05,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    eval_metric="logloss",
+    random_state=42,
+    tree_method="hist",
+    n_jobs=-1,
+)
+model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+
+from sklearn.metrics import roc_auc_score, average_precision_score
+proba = model.predict_proba(X_test)[:, 1]
+print(f"ROC-AUC: {roc_auc_score(y_test, proba):.4f}")
+print(f"PR-AUC : {average_precision_score(y_test, proba):.4f}")
+```
+
+### Categorical encoding before XGBoost
+
+XGBoost (>= 1.6) handles categoricals natively with `enable_categorical=True`,
+but for portability use explicit encoding:
+
+```python
+# Low-cardinality (< 20 unique) → one-hot
+X = pd.get_dummies(df[features], columns=cat_cols, drop_first=False, dtype="int8")
+
+# High-cardinality → ordinal (target encoding only inside CV folds)
+from sklearn.preprocessing import OrdinalEncoder
+oe = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+X[high_card_cols] = oe.fit_transform(X[high_card_cols])
+```
+
+Never label-encode an *unordered* categorical — XGBoost will treat the
+codes as numeric and infer false orderings.
+
+## Three Importance Lenses
+
+Always compute **at least two**. Reporting only one is malpractice.
+
+### 1. Gain (XGBoost split-importance)
+
+Fast, free, biased. Reports total loss reduction attributed to each
+feature across all splits in the ensemble.
+
+```python
+gain = pd.Series(model.feature_importances_, index=X.columns) \
+         .sort_values(ascending=False)
+print(gain.head(15))
+```
+
+**Bias to know:** Gain inflates importance for high-cardinality and
+continuous features (more split candidates = more chances to win a split).
+A 10-level categorical can dominate a binary feature even if the binary
+feature is the true driver. **Never report gain in isolation.**
+
+### 2. Permutation importance (sklearn — model-agnostic)
+
+The safer default. Measures the drop in holdout score when a single
+feature's values are randomly shuffled.
+
+```python
+from sklearn.inspection import permutation_importance
+
+perm = permutation_importance(
+    model, X_test, y_test,
+    n_repeats=5,
+    random_state=42,
+    n_jobs=-1,
+    scoring="r2",            # or "roc_auc" for classification
+)
+perm_df = (pd.DataFrame({
+        "feature": X_test.columns,
+        "importance_mean": perm.importances_mean,
+        "importance_std":  perm.importances_std,
+    })
+    .sort_values("importance_mean", ascending=False)
+    .reset_index(drop=True))
+print(perm_df.head(15).round(4))
+```
+
+Compute on the **holdout set**, not training data. On training data,
+permutation importance is meaningless (the model has memorized).
+
+For very large holdouts (> 100k rows), subsample to 50k for speed —
+permutation runs the model `n_repeats × n_features` times.
+
+### 3. SHAP (TreeExplainer)
+
+Gold standard for tree models. Each feature's contribution to each
+individual prediction, with theoretical guarantees (Shapley values from
+cooperative game theory). Use for both global (mean |SHAP|) and per-row
+explanations.
+
+```python
+import shap
+
+# CRITICAL: sample before SHAP on large data — full SHAP is O(n × trees × leaves)
+X_shap = X_test.sample(min(50_000, len(X_test)), random_state=42)
+
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_shap)
+# shap_values shape: (n_rows, n_features) for regression / binary
+
+# Global importance: mean |SHAP|
+shap_global = (pd.Series(np.abs(shap_values).mean(axis=0), index=X_shap.columns)
+                 .sort_values(ascending=False))
+print(shap_global.head(15).round(4))
+
+# Visual summary (do this in notebooks; for scripts, save to file)
+import matplotlib.pyplot as plt
+shap.summary_plot(shap_values, X_shap, show=False)
+plt.tight_layout()
+plt.savefig("shap_summary.png", dpi=120, bbox_inches="tight")
+plt.close()
+```
+
+**Sampling rules of thumb:**
+
+| Dataset rows | SHAP sample size | Expected runtime |
+|---:|---:|---:|
+| ≤ 10,000 | full | < 30 s |
+| 10k–100k | 20,000 | 1–3 min |
+| 100k–1M | 50,000 | 3–10 min |
+| > 1M | 50,000 (≤ 5%) | 5–15 min |
+
+Larger samples rarely change the ranking; they only tighten the visual
+density of `summary_plot`.
+
+## Cross-Method Agreement Check
+
+The signal that matters is **all three methods agreeing**. Disagreement
+is itself a finding — report it, do not silently pick the winner.
+
+```python
+def rank_compare(*, gain, perm_mean, shap_mean, spearman_rho):
+    """Build a side-by-side rank table. Inputs are pd.Series indexed by feature."""
+    df = pd.DataFrame({
+        "spearman_|rho|": spearman_rho.abs(),
+        "xgb_gain":       gain,
+        "perm_importance": perm_mean,
+        "shap_|mean|":     shap_mean,
+    })
+    ranks = df.rank(ascending=False, method="min").astype(int)
+    ranks.columns = [f"rank_{c}" for c in df.columns]
+    out = pd.concat([df.round(4), ranks], axis=1).sort_values("rank_shap_|mean|")
+    return out
+
+table = rank_compare(
+    gain=gain,
+    perm_mean=perm_df.set_index("feature")["importance_mean"],
+    shap_mean=shap_global,
+    spearman_rho=df[features].corrwith(df[target], method="spearman"),
+)
+print(table.head(15).to_string())
+
+# Quantify agreement: Spearman correlation across the four ranking columns
+agreement = (table.filter(like="rank_").corr(method="spearman")
+                .round(3))
+print("\nRank-method agreement (Spearman):")
+print(agreement)
+```
+
+Interpretation:
+- **Off-diagonal > 0.8:** methods agree → high confidence in the ranking.
+- **0.5–0.8:** mostly agree → report the consensus top-K, flag disagreements.
+- **< 0.5:** methods disagree → suspect non-linearity, feature interaction,
+  or one of the methods is misled. Investigate before publishing a ranking.
+
+## Interaction Detection
+
+When SHAP and linear β disagree on a feature's importance, the most common
+cause is an interaction effect. Check with SHAP dependence plots:
+
+```python
+# Top feature dependence — does its SHAP value depend on another feature?
+top_feature = shap_global.index[0]
+shap.dependence_plot(top_feature, shap_values, X_shap, show=False)
+plt.tight_layout(); plt.savefig(f"shap_dep_{top_feature}.png", dpi=120); plt.close()
+```
+
+For an explicit interaction-strength matrix (only on small data):
+
+```python
+# WARNING: O(n × features²) — use only when features ≤ 30 and rows ≤ 10,000
+if X_shap.shape[1] <= 30 and len(X_shap) <= 10_000:
+    shap_inter = explainer.shap_interaction_values(X_shap)
+    # off-diagonal magnitude = pairwise interaction strength
+    inter_mat = np.abs(shap_inter).mean(axis=0)
+    np.fill_diagonal(inter_mat, 0)
+    pairs = (pd.DataFrame(inter_mat, index=X_shap.columns, columns=X_shap.columns)
+             .stack().reset_index()
+             .rename(columns={"level_0":"a","level_1":"b",0:"interaction"})
+             .query("a < b").sort_values("interaction", ascending=False))
+    print(pairs.head(10).round(4))
+```
+
+For larger data, infer interactions qualitatively from `dependence_plot`
+color spread, then verify on a 10k subsample.
+
+## Anti-Patterns / Leakage
+
+These are the failures that make tree-based "importance" results
+worthless. Check for each one before reporting.
+
+| Anti-pattern | Symptom | Fix |
+|---|---|---|
+| Using post-outcome variables as predictors | Importance dominated by one variable that's a derived/composite of the target (e.g. predicting `stress_level` with `mental_health_index` in it) | Drop variables that are computed from or after the target |
+| No train/test split | "R² = 0.99" but new data scores 0.30 | Always hold out 20% before fitting |
+| SHAP fit on training data | SHAP plot looks "too clean" — everything matters perfectly | SHAP must be computed on the holdout / held-out sample |
+| Label-encoding nominal categorical | Tree splits invent ordinal relationships | Use `get_dummies` for nominal; only ordinal-encode true ordinals |
+| Reporting gain alone | Continuous features dominate; binary features look unimportant | Always include permutation or SHAP cross-check |
+| No `random_state` | Re-running gives a different ranking | Set `random_state=` on split, model, and SHAP sample |
+| Importance on a model that hasn't converged | Wild swings between runs | Confirm training error has stabilized; raise `n_estimators` or check for class imbalance |
+
+The **first** anti-pattern is the most common in EDA: when the target is
+a survey scale or composite (stress, satisfaction, NPS, mental health
+index), other survey scales in the same instrument are often
+mathematically related. Drop them before fitting.
+
+## Reporting Template
+
+When the cross-check is done, deliver a single rank-comparison table plus
+a one-paragraph interpretation. The table is the artifact:
+
+```
+| Feature             | Spearman ρ | std β | Perm. Imp. | SHAP \|mean\| | Rank consensus |
+|---------------------|-----------:|------:|-----------:|--------------:|---------------:|
+| financial_stress    | +0.453     | +0.47 | 0.214      | 0.79          | 1 (all 4)      |
+| exam_pressure       | +0.444     | +0.46 | 0.087      | 0.71          | 2 (all 4)      |
+| family_expectation  | +0.336     | +0.35 | 0.118      | 0.52          | 3 (all 4)      |
+| sleep_hours         | -0.254     | -0.26 | 0.066      | 0.31          | 4 (all 4)      |
+| physical_activity   | -0.167     | -0.17 | 0.029      | 0.18          | 5 (all 4)      |
+| study_hours_per_day | +0.340     |  0.00 | 0.001      | 0.04          | 9 → ρ misled by collinearity with exam_pressure |
+```
+
+Required prose elements:
+1. **Headline finding:** the consensus #1 driver, with std β + SHAP magnitudes.
+2. **Method-agreement summary:** rank-correlation across the four lenses.
+3. **Disagreements called out by name:** any feature whose linear-rank and
+   SHAP-rank differ by ≥ 3 — explain why (collinearity, non-linearity, or
+   interaction).
+4. **Interactions found:** top SHAP dependence pairs, if any.
+5. **Holdout R² (or ROC-AUC):** the model's predictive power on unseen data.
+6. **Caveats:** sample size for SHAP, dropped-leakage variables, optional
+   library versions.
+
+## Performance Cheatsheet
+
+| Issue | Fix |
+|---|---|
+| XGBoost training slow on millions of rows | `tree_method="hist"`, `subsample=0.5`, fewer `n_estimators` |
+| OOM during SHAP | Sample to 20k–50k rows; use `TreeExplainer` (not `KernelExplainer`) |
+| SHAP plot crowded | Set `max_display=20` in `shap.summary_plot` |
+| `permutation_importance` slow | Drop `n_repeats` to 3; subsample test set to 20k |
+| Different importance ranks across runs | Set `random_state=` everywhere; check that the model converged |
+
+## Decision Cheatsheet
+
+```
+Linear analysis done (Spearman ρ + std β + ΔR²)?
+   ↓ no  → run that first (statistical-analysis.md)
+   ↓ yes
+R² ≥ 0.4 and rankings stable?
+   ↓ yes → STOP. Report linear result. ML adds no value here.
+   ↓ no
+Run XGBoost + permutation + SHAP cross-check.
+   ↓
+Methods agree (Spearman rank-corr ≥ 0.8)?
+   ↓ yes → Report consensus ranking, note ML confirmed linear analysis.
+   ↓ no
+Investigate disagreement:
+   - Collinearity?  → drop redundant feature, rerun.
+   - Non-linearity? → SHAP dependence plot, report shape.
+   - Interaction?   → SHAP interaction values on subsample, report pair.
+Report all three rankings + the interpretation that resolves them.
+```

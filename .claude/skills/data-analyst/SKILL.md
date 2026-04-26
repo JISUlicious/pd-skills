@@ -46,6 +46,7 @@ Install with `uv venv .venv && uv pip install pandas numpy matplotlib seaborn sc
 | Dtypes, PyArrow, memory, vectorization, CoW | `performance-optimization.md` |
 | Matplotlib, Seaborn, Plotly, dashboards | `visualization.md` |
 | Categorical, Styler, eval, nullable types, pipe | `advanced-pandas.md` |
+| XGBoost, SHAP, permutation importance, interactions, non-linear drivers | `feature-importance.md` |
 
 ### Task-Specific File Loading
 
@@ -53,6 +54,7 @@ For **EDA / data profiling**: read `data-loading.md`, `data-exploration.md`, `vi
 For **data cleaning**: read `data-cleaning.md`, `indexing-selection.md`
 For **feature engineering**: read `data-transformation.md`, `time-series.md`
 For **statistical analysis**: read `statistical-analysis.md`, `visualization.md`
+For **feature importance / non-linear drivers**: read `feature-importance.md`, `statistical-analysis.md`
 For **performance issues**: read `performance-optimization.md`, `data-loading.md`
 
 ## Workflow
@@ -79,6 +81,7 @@ end of `data-exploration.md`. Report any unchecked items to the user.
 - Use `Int64` (nullable) not `int64` when column can have NaN
 - Prefer vectorized operations over `apply(axis=1)` or loops
 - Use assignment `df = df.method()` not `df.method(inplace=True)`
+- When linear analysis yields R² < 0.4 or rankings disagree, cross-check with XGBoost + SHAP (see `feature-importance.md`) before reporting drivers
 
 **Never do:**
 - Loop over rows when vectorized alternative exists
