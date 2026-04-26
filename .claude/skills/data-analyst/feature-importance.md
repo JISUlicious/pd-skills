@@ -126,6 +126,37 @@ print(ridge_coefs)
 Always **report VIF in the output** — it is the most concise way to tell a
 reader whether the OLS β values are interpretable as independent effects.
 
+### 1b. Target skew check (regression only)
+
+Before fitting a regression, check the target's distribution. Heavy
+right-skew (common for prices, counts, durations, revenues) inflates
+the influence of high-tail observations on OLS β and produces
+heteroscedastic residuals. The fix is one line:
+
+```python
+print(f"Target skew: {y.skew():+.2f}")
+if y.skew() > 1 and (y > 0).all():
+    print("  → heavy right-skew; using log1p(y) for modeling")
+    y_model = np.log1p(y)
+elif y.skew() < -1:
+    print("  → heavy left-skew; consider Box-Cox or square transform")
+    y_model = y                                  # decide case-by-case
+else:
+    y_model = y
+
+print(f"Skew after transform: {y_model.skew():+.2f}")
+```
+
+Always report **both** raw-target and transformed-target R² so the
+reader can see the predictive gain. When you log-transform, also
+translate model errors back to original units for stakeholders:
+
+```python
+mae_log = mean_absolute_error(y_test, pred)
+mae_dollars = y_raw.median() * (np.exp(mae_log) - 1)   # for regression on log(y)
+print(f"MAE in log space: {mae_log:.4f}  (~{mae_dollars/y_raw.median():.1%} relative error)")
+```
+
 ### 2. Null-handling policy for modeling
 
 The data-cleaning skill (`data-cleaning.md`) covers fillna / dropna /
@@ -134,28 +165,46 @@ rules apply that are easy to violate:
 
 ```python
 def null_audit(X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
-    """Per-feature null fraction + correlation of missingness with target.
-    Non-zero |miss-target rho| means missingness itself carries signal —
-    informative missingness — and a missing-indicator column is required."""
+    """Per-feature null fraction + association of missingness with target.
+    Non-zero |miss-target assoc| means missingness itself carries signal —
+    informative missingness — and a missing-indicator column is required.
+    Picks the right association measure based on target dtype."""
+    from scipy import stats
+    is_num   = pd.api.types.is_numeric_dtype(y) and not pd.api.types.is_bool_dtype(y)
+    is_bin   = pd.api.types.is_bool_dtype(y) or (is_num and y.nunique() == 2)
     rows = []
     for col in X.columns:
         miss_pct = float(X[col].isna().mean())
         if miss_pct == 0:
-            rows.append({"feature": col, "null_pct": 0.0, "miss_target_rho": 0.0})
+            rows.append({"feature": col, "null_pct": 0.0, "miss_target_assoc": 0.0})
             continue
         is_miss = X[col].isna().astype(int)
-        rho = float(is_miss.corr(y, method="spearman"))
+        if is_bin:                                  # binary target → point-biserial r
+            r, _ = stats.pointbiserialr(is_miss, pd.Series(y).astype(int))
+            assoc = float(r)
+        elif is_num:                                # continuous numeric target → Spearman ρ
+            assoc = float(is_miss.corr(y, method="spearman"))
+        else:                                       # multiclass categorical → Cramér's V
+            ct = pd.crosstab(is_miss, y)
+            chi2, *_ = stats.chi2_contingency(ct)
+            n = ct.sum().sum()
+            denom = n * max(min(ct.shape) - 1, 1)
+            assoc = float(np.sqrt(chi2 / denom)) if denom > 0 else 0.0
         rows.append({"feature": col, "null_pct": round(miss_pct, 4),
-                     "miss_target_rho": round(rho, 4)})
+                     "miss_target_assoc": round(assoc, 4)})
     return pd.DataFrame(rows).sort_values("null_pct", ascending=False)
 
 audit = null_audit(X, y)
 print(audit.to_string(index=False))
 ```
 
+`miss_target_assoc` is Spearman ρ for numeric targets, point-biserial r
+for binary, and Cramér's V for multiclass. All three live on a comparable
+[-1, 1] / [0, 1] scale, so the same 0.05 threshold below applies.
+
 **Decision rules per feature (apply per column, not whole DataFrame):**
 
-| null_pct | miss_target_rho | Recommended action |
+| null_pct | \|miss_target_assoc\| | Recommended action |
 |---:|---:|---|
 | 0% | — | none |
 | < 1% | any | drop those rows |
@@ -185,10 +234,10 @@ print(f"Attenuation:          {(r2_clean - r2_imp):.4f}")
 ```
 
 If attenuation > 0.05, **and** missingness is informative
-(`miss_target_rho` ≥ 0.05), use the indicator+impute pattern — the
+(`miss_target_assoc` ≥ 0.05), use the indicator+impute pattern — the
 indicator captures the missingness signal that imputation erases.
 
-For purely random missingness (`miss_target_rho` ≈ 0), naive median
+For purely random missingness (`miss_target_assoc` ≈ 0), naive median
 imputation is usually fine; indicator+impute can slightly *worsen* the
 original column's β because the indicator absorbs variance, although it
 preserves R² better. Pick the pattern that matches what's actually
@@ -473,6 +522,7 @@ worthless. Check for each one before reporting.
 | Mean/median imputation in linear regression without warning | β attenuated toward zero (~5–15% per imputed column) | Add `{col}_is_missing` indicator before imputing, OR report R² before vs. after imputation |
 | Dropping rows with nulls when missingness correlates with target | Sample becomes biased; β reflects only respondents who answered | Run `null_audit()`; if `miss_target_rho >= 0.05`, use indicator+impute, never drop |
 | Reporting OLS β when VIF > 10 | β values flip sign or change magnitude across re-runs | Drop one of the redundant pair, OR switch to RidgeCV |
+| "Most important feature" is itself a rating-summary | Top driver is `OverallQual`/`Score`/`Rating` while per-component ratings (`KitchenQual`, `ExterQual`, …) sit just behind | Surface the redundancy: report the rating cluster as one composite, or run an importance pass with the summary feature removed to see what fills its place |
 
 The **first** anti-pattern is the most common in EDA: when the target is
 a survey scale or composite (stress, satisfaction, NPS, mental health
