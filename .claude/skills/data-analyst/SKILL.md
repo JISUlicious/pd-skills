@@ -47,6 +47,7 @@ Install with `uv venv .venv && uv pip install pandas numpy matplotlib seaborn sc
 | Matplotlib, Seaborn, Plotly, dashboards | `visualization.md` |
 | Categorical, Styler, eval, nullable types, pipe | `advanced-pandas.md` |
 | XGBoost, SHAP, permutation importance, interactions, non-linear drivers | `feature-importance.md` |
+| Root-cause / defect / yield excursion / change-point / SPC / causal | `root-cause-analysis.md` |
 
 ### Task-Specific File Loading
 
@@ -55,6 +56,7 @@ For **data cleaning**: read `data-cleaning.md`, `indexing-selection.md`
 For **feature engineering**: read `data-transformation.md`, `time-series.md`
 For **statistical analysis**: read `statistical-analysis.md`, `visualization.md`
 For **feature importance / non-linear drivers**: read `feature-importance.md`, `statistical-analysis.md`
+For **root-cause / yield / defect / process-excursion analysis**: read `root-cause-analysis.md`, `time-series.md`, `feature-importance.md`
 For **performance issues**: read `performance-optimization.md`, `data-loading.md`
 
 ## Workflow
@@ -84,6 +86,7 @@ end of `data-exploration.md`. Report any unchecked items to the user.
 - When linear analysis yields R² < 0.4 or rankings disagree, cross-check with XGBoost + SHAP (see `feature-importance.md`) before reporting drivers
 - Before reporting OLS β, run a VIF audit (`feature-importance.md` § Pre-Modeling Diagnostics) — flag features with VIF > 5; switch to RidgeCV when VIF > 10
 - For any feature with > 1% nulls, apply the null-audit decision rules (drop / impute / indicator+impute / remove) — never silently `dropna()` before fitting
+- For RCA / excursion / defect-investigation questions, run change-point detection before regression — a localized shift in time needs a localized cause, not a global feature ranking (see `root-cause-analysis.md`)
 
 **Never do:**
 - Loop over rows when vectorized alternative exists

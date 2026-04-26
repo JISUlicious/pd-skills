@@ -12,6 +12,11 @@ the conditions below are met.
 
 ## When to Escalate
 
+> **If the question is *what caused the shift?* (not *what predicts the
+> level?*), see `root-cause-analysis.md` first.** Feature importance is
+> associational; root-cause needs change-point detection, commonality, and
+> causal-inference tools that this file does not cover.
+
 Escalate from linear → tree-based importance when **any** of these hold:
 
 | Trigger | Why linear is inadequate |
