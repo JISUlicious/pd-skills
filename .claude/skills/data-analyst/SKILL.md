@@ -82,6 +82,8 @@ end of `data-exploration.md`. Report any unchecked items to the user.
 - Prefer vectorized operations over `apply(axis=1)` or loops
 - Use assignment `df = df.method()` not `df.method(inplace=True)`
 - When linear analysis yields R² < 0.4 or rankings disagree, cross-check with XGBoost + SHAP (see `feature-importance.md`) before reporting drivers
+- Before reporting OLS β, run a VIF audit (`feature-importance.md` § Pre-Modeling Diagnostics) — flag features with VIF > 5; switch to RidgeCV when VIF > 10
+- For any feature with > 1% nulls, apply the null-audit decision rules (drop / impute / indicator+impute / remove) — never silently `dropna()` before fitting
 
 **Never do:**
 - Loop over rows when vectorized alternative exists

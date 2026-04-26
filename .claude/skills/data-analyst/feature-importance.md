@@ -53,6 +53,163 @@ If `HAS_ML` is False, fall back to the linear analysis from
 `statistical-analysis.md` and tell the user explicitly that the ML
 cross-check was skipped.
 
+## Pre-Modeling Diagnostics
+
+Two checks before fitting any importance model. They take seconds and
+prevent the most common silent-failure modes: ranking driven by collinear
+predictors, and ranking driven by which rows survived null-dropping.
+
+### 1. Multicollinearity audit (VIF)
+
+VIF (Variance Inflation Factor) for column j is `1 / (1 − R²_j)` where
+`R²_j` is from regressing column j on every other predictor. Interpretation:
+
+| VIF | Meaning | Action |
+|---:|---|---|
+| 1 | independent | none |
+| 1–5 | mild | none |
+| 5–10 | moderate | OLS β unstable; rely on SHAP/permutation cross-check |
+| > 10 | severe | drop one of the redundant pair, OR switch to Ridge/Lasso |
+
+```python
+import numpy as np
+import pandas as pd
+
+def vif_table(X: pd.DataFrame) -> pd.DataFrame:
+    """VIF_j = 1 / (1 - R²_j), R²_j from regressing column j on the others."""
+    Xv = X.to_numpy(dtype=np.float64)
+    rows = []
+    for j, col in enumerate(X.columns):
+        y = Xv[:, j]
+        Xrest = np.delete(Xv, j, axis=1)
+        Xd = np.column_stack([np.ones(len(Xrest)), Xrest])
+        beta, *_ = np.linalg.lstsq(Xd, y, rcond=None)
+        yhat = Xd @ beta
+        ss_tot = ((y - y.mean()) ** 2).sum()
+        if ss_tot == 0:
+            vif = float("inf")
+        else:
+            r2 = 1 - ((y - yhat) ** 2).sum() / ss_tot
+            vif = float("inf") if r2 >= 0.9999 else 1 / (1 - r2)
+        rows.append({"feature": col, "R²_on_others": round(float(r2), 4),
+                     "VIF": round(float(vif), 2)})
+    return pd.DataFrame(rows).sort_values("VIF", ascending=False).reset_index(drop=True)
+
+vif = vif_table(X)
+print(vif.to_string(index=False))
+
+severe   = vif.query("VIF > 10")["feature"].tolist()
+moderate = vif.query("5 < VIF <= 10")["feature"].tolist()
+if severe:
+    print(f"⚠ SEVERE multicollinearity (VIF > 10): {severe}")
+    print("  → drop one of each redundant pair OR switch to RidgeCV / LassoCV")
+elif moderate:
+    print(f"⚠ Moderate multicollinearity (VIF 5-10): {moderate}")
+    print("  → linear β is unstable; trust SHAP & permutation rankings over β")
+```
+
+When VIF > 10, prefer regularized regression for the linear baseline:
+
+```python
+from sklearn.linear_model import RidgeCV
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+Xz = scaler.fit_transform(X)
+yz = (y - y.mean()) / y.std()
+ridge = RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0, 100.0]).fit(Xz, yz)
+ridge_coefs = pd.Series(ridge.coef_, index=X.columns).sort_values(key=abs, ascending=False)
+print(f"Best α: {ridge.alpha_}, R²: {ridge.score(Xz, yz):.4f}")
+print(ridge_coefs)
+```
+
+Always **report VIF in the output** — it is the most concise way to tell a
+reader whether the OLS β values are interpretable as independent effects.
+
+### 2. Null-handling policy for modeling
+
+The data-cleaning skill (`data-cleaning.md`) covers fillna / dropna /
+interpolation in general. For **modeling specifically**, three additional
+rules apply that are easy to violate:
+
+```python
+def null_audit(X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+    """Per-feature null fraction + correlation of missingness with target.
+    Non-zero |miss-target rho| means missingness itself carries signal —
+    informative missingness — and a missing-indicator column is required."""
+    rows = []
+    for col in X.columns:
+        miss_pct = float(X[col].isna().mean())
+        if miss_pct == 0:
+            rows.append({"feature": col, "null_pct": 0.0, "miss_target_rho": 0.0})
+            continue
+        is_miss = X[col].isna().astype(int)
+        rho = float(is_miss.corr(y, method="spearman"))
+        rows.append({"feature": col, "null_pct": round(miss_pct, 4),
+                     "miss_target_rho": round(rho, 4)})
+    return pd.DataFrame(rows).sort_values("null_pct", ascending=False)
+
+audit = null_audit(X, y)
+print(audit.to_string(index=False))
+```
+
+**Decision rules per feature (apply per column, not whole DataFrame):**
+
+| null_pct | miss_target_rho | Recommended action |
+|---:|---:|---|
+| 0% | — | none |
+| < 1% | any | drop those rows |
+| 1–10% | < 0.05 | XGBoost: pass through (handles NaN natively); Linear: median-impute, **warn about R² attenuation** |
+| 1–10% | ≥ 0.05 | **informative missingness** — add `{col}_is_missing` indicator column, then median-impute the original |
+| 10–50% | < 0.05 | indicator + median-impute (same as above; the missingness is large enough that the indicator helps even if MAR) |
+| 10–50% | ≥ 0.05 | indicator + median-impute, and call out the strong missingness signal in the report |
+| > 50% | any | drop the column entirely; report it as "too sparse to model" |
+
+**Imputation attenuation bias (linear regression only):** mean/median
+imputation shrinks β toward zero by approximately `null_pct × σ_imputed / σ_observed`.
+For a column with 10% nulls, expect ~5–10% attenuation in its β. Always
+report R² before and after imputation:
+
+```python
+# Before imputation (drop NaN rows)
+clean_mask = X.notna().all(axis=1) & y.notna()
+r2_clean = fit_linear(X[clean_mask], y[clean_mask])
+
+# After imputation (keep all rows)
+X_imp = X.fillna(X.median(numeric_only=True))
+r2_imp = fit_linear(X_imp, y)
+
+print(f"R² before imputation: {r2_clean:.4f}  (rows: {clean_mask.sum():,})")
+print(f"R² after  imputation: {r2_imp:.4f}    (rows: {len(X):,})")
+print(f"Attenuation:          {(r2_clean - r2_imp):.4f}")
+```
+
+If attenuation > 0.05, **and** missingness is informative
+(`miss_target_rho` ≥ 0.05), use the indicator+impute pattern — the
+indicator captures the missingness signal that imputation erases.
+
+For purely random missingness (`miss_target_rho` ≈ 0), naive median
+imputation is usually fine; indicator+impute can slightly *worsen* the
+original column's β because the indicator absorbs variance, although it
+preserves R² better. Pick the pattern that matches what's actually
+informative in the data — don't add indicators reflexively.
+
+**XGBoost native NaN handling:** XGBoost (>= 1.6) learns a "default
+direction" at each split for NaN values. Pass NaN through directly; do
+**not** impute before fitting unless you also add a missing-indicator
+column. This is one of the few places linear and tree paths legitimately
+diverge — the linear path needs imputation, the tree path does not.
+
+```python
+# XGBoost path: pass NaN through
+model = xgb.XGBRegressor(...).fit(X_train_with_nans, y_train)
+
+# Linear path: indicator + impute
+for col in cols_with_nulls:
+    X[f"{col}_is_missing"] = X[col].isna().astype("int8")
+X = X.fillna(X.median(numeric_only=True))
+```
+
 ## XGBoost Baseline Recipe
 
 Use sensible defaults — do not hyperparameter-tune unless explicitly
@@ -313,6 +470,9 @@ worthless. Check for each one before reporting.
 | Reporting gain alone | Continuous features dominate; binary features look unimportant | Always include permutation or SHAP cross-check |
 | No `random_state` | Re-running gives a different ranking | Set `random_state=` on split, model, and SHAP sample |
 | Importance on a model that hasn't converged | Wild swings between runs | Confirm training error has stabilized; raise `n_estimators` or check for class imbalance |
+| Mean/median imputation in linear regression without warning | β attenuated toward zero (~5–15% per imputed column) | Add `{col}_is_missing` indicator before imputing, OR report R² before vs. after imputation |
+| Dropping rows with nulls when missingness correlates with target | Sample becomes biased; β reflects only respondents who answered | Run `null_audit()`; if `miss_target_rho >= 0.05`, use indicator+impute, never drop |
+| Reporting OLS β when VIF > 10 | β values flip sign or change magnitude across re-runs | Drop one of the redundant pair, OR switch to RidgeCV |
 
 The **first** anti-pattern is the most common in EDA: when the target is
 a survey scale or composite (stress, satisfaction, NPS, mental health
@@ -359,6 +519,11 @@ Required prose elements:
 ## Decision Cheatsheet
 
 ```
+PRE-FIT — always run these first:
+   1. vif_table(X)        — any VIF > 10? drop redundant feature OR use RidgeCV.
+   2. null_audit(X, y)    — apply per-column rules (drop / impute / indicator+impute / remove).
+   3. Drop post-outcome leakage variables (composites of the target).
+
 Linear analysis done (Spearman ρ + std β + ΔR²)?
    ↓ no  → run that first (statistical-analysis.md)
    ↓ yes

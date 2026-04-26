@@ -115,6 +115,12 @@ print(f"Pearson r={r:.3f}, p={p:.4f}")
 r, p = stats.pointbiserialr(df["binary_col"], df["continuous_col"])
 ```
 
+When fitting OLS on a correlation matrix with several |ρ| > 0.7 pairs,
+run a VIF audit before interpreting coefficients (`feature-importance.md`
+§ Pre-Modeling Diagnostics). High inter-predictor correlation
+makes individual β values unstable — the cross-method check there is
+the safe path.
+
 ## Hypothesis Testing
 
 ### Two-Sample Tests
