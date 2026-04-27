@@ -240,8 +240,61 @@ is drifting between subgroups — investigate.
 
 ## 3. Commonality Analysis
 
-For "*which categorical level appears in all bad lots but few good
-lots?*" — set-overlap, not regression.
+### Collapse multicollinear sensor clusters first
+
+In manufacturing data, adjacent sensors measuring the same physical state
+(chamber temp ↔ wall temp ↔ chuck temp; recipe pressure ↔ measured
+pressure) are nearly perfectly correlated. **Without collapsing first,
+your commonality table reports 8 members of one physical cluster as 8
+separate findings** — useless for an engineer reading the report.
+
+Use the framework in `data-exploration.md` § 6 (the 5-priority
+`select_cluster_representative()` helper), with one critical override:
+
+> **Priority 3 override for RCA:** rank cluster members by **|shift
+> magnitude at the change point|** in σ-units of the pre-period —
+> *not* by overall target correlation. The most predictive sensor
+> overall and the sensor that moved most when the excursion happened
+> are often different. SECOM verified this empirically: SHAP top-10
+> and CPD-commonality top-10 overlapped by 1 of 10.
+
+```python
+def shift_score(pre_df, post_df, col):
+    """RCA-context Priority 3: |Δ| in σ-units of the pre-period."""
+    pre = pre_df[col].dropna()
+    post = post_df[col].dropna()
+    if len(pre) < 30 or pre.std() == 0:
+        return 0.0
+    return abs(post.mean() - pre.mean()) / pre.std()
+
+# Per cluster — pre_df / post_df defined by the change-point window
+for cluster in find_clusters(X[sensor_cols], rho_threshold=0.85):
+    keep, drop, reason = select_cluster_representative(
+        X, y=None, cluster_cols=cluster,
+        score_fn=lambda Xf, _y, c: shift_score(pre_df, post_df, c),
+    )
+    if keep is None:
+        print(f"⚠ AMBIGUOUS cluster — flag for engineer review: {cluster}")
+        continue
+    print(f"cluster {cluster} → represented by {keep} ({reason})")
+    sensor_cols = [c for c in sensor_cols if c not in drop]
+```
+
+Report cluster-level findings in the RCA narrative:
+
+> "**Cluster of 8 chamber-state sensors** (s406, s540, s268, s405, s539,
+> s267, s058, s007) shifted at the change point. Cluster represented by
+> `s406` (Δ = +5.15, normalized +4.5σ). Treat as a single physical
+> phenomenon when investigating root cause."
+
+— *not* "8 individual sensors shifted," which dilutes the engineer's
+attention across redundant measurements of the same physical event.
+
+### Per-categorical-factor commonality
+
+Once collinear sensor clusters are collapsed, run commonality on the
+remaining set. For "*which categorical level appears in all bad lots but
+few good lots?*" — set-overlap, not regression.
 
 ```python
 from scipy.stats import fisher_exact

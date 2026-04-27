@@ -269,6 +269,165 @@ distinct are actually redundant. The Pre-Modeling Diagnostics section in
 `feature-importance.md` covers Ridge/Lasso fallback patterns and the full
 decision rules for VIF tiers.
 
+### Selecting cluster representatives — when you must drop one
+
+When VIF flags a multicollinear cluster and the downstream method can't
+tolerate it (OLS coefficient interpretation, Lasso feature selection,
+RCA commonality reporting), you have to pick one representative and drop
+the rest. **Picking arbitrarily is the most common silent error** — the
+"kept" feature determines what story the analysis tells.
+
+Apply this priority order:
+
+| Priority | Rule | Why |
+|---|---|---|
+| 1 | If one column ≈ Σ(others) with R² ≥ 0.99, drop that aggregate, keep components | Components carry strictly more granular information |
+| 2 | If a column name matches summary patterns (`overall`, `total`, `index`, `score`, `rating`, `summary`) and per-component features exist, drop the summary | Avoid the rating-tautology trap (Ames Overall Qual case) |
+| 3 | **Context-specific (override below):** rank by `|ρ(target)|` on training fold, keep highest | Most useful for the analysis goal |
+| 4 | Tiebreak: fewer nulls | Less imputation noise |
+| 5 | Final tiebreak: higher coefficient of variation | More dynamic range, more information |
+| 6 | If still tied within 5%, FLAG for human review — do not auto-decide | Domain knowledge required |
+
+**Priority 3 changes per analysis context:**
+
+| Context | Score by |
+|---|---|
+| Feature importance / driver analysis | `|ρ(target)|` on training fold (default) |
+| RCA / change-point / commonality | `|Δ at change point|` in σ-units of the pre-period |
+| Pure EDA without a target | Variance after standardization |
+
+```python
+import numpy as np
+import pandas as pd
+
+SUMMARY_PATTERNS = ("overall", "total", "index", "score", "rating", "summary")
+
+
+def find_aggregate(X, cluster_cols, threshold=0.99):
+    """Return the cluster member best predicted by the rest (R² ≥ threshold).
+
+    When multiple members satisfy the threshold (e.g. the perfect-sum case
+    `agg = a + b + c` where any of the four can be predicted from the
+    other three), prefer the one with the **largest mean magnitude** —
+    aggregates tend to be sums and are numerically larger than their
+    components. This produces the more interpretable choice for human
+    readers.
+    """
+    Xc = X[cluster_cols].dropna()
+    if len(Xc) < len(cluster_cols) + 1:
+        return None
+    candidates = []
+    for col in cluster_cols:
+        others = [c for c in cluster_cols if c != col]
+        Xrest = Xc[others].to_numpy(dtype=np.float64)
+        y = Xc[col].to_numpy(dtype=np.float64)
+        Xd = np.column_stack([np.ones(len(Xrest)), Xrest])
+        beta, *_ = np.linalg.lstsq(Xd, y, rcond=None)
+        ss_tot = ((y - y.mean()) ** 2).sum()
+        if ss_tot == 0:
+            continue
+        r2 = 1 - ((y - Xd @ beta) ** 2).sum() / ss_tot
+        if r2 >= threshold:
+            candidates.append((col, abs(float(Xc[col].mean()))))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: -t[1])             # largest magnitude first
+    return candidates[0][0]
+
+
+def select_cluster_representative(
+    X, y, cluster_cols, *,
+    fold_mask=None,
+    score_fn=None,
+):
+    """Returns (keep_list, drop_list, reason).
+
+    score_fn(X_fold, y_fold, col) → float — higher is better.
+    Default: |ρ(target)| via Spearman; falls back to variance if y is None.
+    """
+    Xf = X.loc[fold_mask] if fold_mask is not None else X
+    yf = (y.loc[fold_mask] if (y is not None and fold_mask is not None)
+          else (y if y is not None else None))
+
+    # Priority 1: aggregate-vs-components
+    agg = find_aggregate(Xf, cluster_cols)
+    if agg is not None:
+        components = [c for c in cluster_cols if c != agg]
+        return components, [agg], f"aggregate dropped: {agg} ≈ Σ({components})"
+
+    # Priority 2: summary names
+    summaries = [c for c in cluster_cols
+                 if any(p in c.lower() for p in SUMMARY_PATTERNS)]
+    components = [c for c in cluster_cols if c not in summaries]
+    if summaries and components:
+        return components, summaries, f"summary names dropped: {summaries}"
+
+    # Priority 3: context-aware score
+    if score_fn is None:
+        if yf is None:
+            score_fn = lambda Xf, _y, c: float(Xf[c].std())
+        else:
+            score_fn = lambda Xf, yf, c: abs(
+                float(Xf[c].corr(yf, method="spearman"))
+            )
+
+    scores = (pd.Series({c: score_fn(Xf, yf, c) for c in cluster_cols})
+                .sort_values(ascending=False))
+    if len(scores) == 1:
+        return [scores.index[0]], [], "single member"
+
+    top = scores.iloc[0]
+    runner_up = scores.iloc[1]
+
+    # Priority 4-5: tiebreak when top-2 within 5%
+    if top > 0 and (top - runner_up) / top < 0.05:
+        candidates = scores[scores >= runner_up * 0.95].index.tolist()
+        tie = pd.Series({
+            c: (1 - X[c].isna().mean())
+               * (X[c].std() / (abs(X[c].mean()) + 1e-9))
+            for c in candidates
+        }).sort_values(ascending=False)
+        if len(tie) > 1 and tie.iloc[0] > 0 \
+           and (tie.iloc[0] - tie.iloc[1]) / tie.iloc[0] < 0.05:
+            return None, None, f"AMBIGUOUS — manual review needed: {candidates}"
+        keep = tie.index[0]
+    else:
+        keep = scores.index[0]
+
+    drop_list = [c for c in cluster_cols if c != keep]
+    return [keep], drop_list, f"kept {keep} (score={scores[keep]:.3f})"
+```
+
+**Workflow** — identify clusters (group features with pairwise |ρ| ≥ 0.85),
+call the selector per cluster, then re-audit VIF on what remains:
+
+```python
+from scipy.cluster.hierarchy import linkage, fcluster
+
+def find_clusters(X, rho_threshold=0.85):
+    """Hierarchical clustering on |corr|. Returns list of column lists."""
+    corr = X.corr(method="spearman").abs().fillna(0)
+    dist = 1 - corr
+    Z = linkage(dist.values[np.triu_indices_from(dist.values, k=1)], method="average")
+    labels = fcluster(Z, t=1 - rho_threshold, criterion="distance")
+    clusters = [list(corr.columns[labels == lbl]) for lbl in set(labels)]
+    return [c for c in clusters if len(c) > 1]
+
+for cluster in find_clusters(X[numeric_cols], rho_threshold=0.85):
+    keep, drop, reason = select_cluster_representative(X, y, cluster)
+    if keep is None:
+        print(f"⚠ AMBIGUOUS cluster — flag for review: {cluster}")
+        continue
+    print(f"cluster {cluster} → keep {keep} ({reason})")
+    numeric_cols = [c for c in numeric_cols if c not in drop]
+
+print(vif_table(X[numeric_cols]))                  # re-audit; expect VIF < 5 throughout
+```
+
+After dropping, **re-run `vif_table` to confirm** the kept features' VIFs
+returned below 5. If a feature still shows VIF > 5, the cluster wasn't
+captured — extend the cluster (lower `rho_threshold`) and retry.
+
 ## Step 6.5 — Derived-Column / Target-Leakage Check
 
 A categorical column that is strictly a function of some numeric column is a

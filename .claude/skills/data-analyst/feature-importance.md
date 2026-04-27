@@ -131,6 +131,36 @@ print(ridge_coefs)
 Always **report VIF in the output** — it is the most concise way to tell a
 reader whether the OLS β values are interpretable as independent effects.
 
+### 1a. Picking the representative when you must drop
+
+Use the framework in `data-exploration.md` § 6 (5-priority selector +
+`select_cluster_representative()` helper).
+
+For feature-importance work, **Priority 3 is the default `|ρ(target)|`
+score**. Compute it on the **training fold only** to avoid soft target
+leakage when the dropped/kept choice subsequently propagates into a
+cross-validated R²:
+
+```python
+from sklearn.model_selection import train_test_split
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
+fold_mask = X.index.isin(X_tr.index)
+
+for cluster in find_clusters(X[numeric_cols]):
+    keep, drop, reason = select_cluster_representative(
+        X, y, cluster, fold_mask=fold_mask
+    )
+    # apply drops on both folds, then refit
+```
+
+After dropping, refit and verify three things:
+1. R² didn't drop noticeably (kept feature absorbed the dropped signal)
+2. The kept feature's std-β / SHAP magnitude inflated to fill the gap
+3. VIF for the kept feature returned to < 5 (cluster fully captured)
+
+If R² dropped > 0.05 on the holdout, the cluster contained genuinely
+distinct signal — don't drop, switch to RidgeCV instead.
+
 ### 1b. Target skew check (regression only)
 
 Before fitting a regression, check the target's distribution. Heavy
