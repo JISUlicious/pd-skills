@@ -217,6 +217,58 @@ if loners:
     print("  → verify whether these are IDs, independent factors, or targets")
 ```
 
+### Multicollinearity audit (VIF) — run on every dataset
+
+VIF (Variance Inflation Factor) is **not optional** and **not deferred to
+modeling time**. Run it as part of every Explore step, before any
+correlation interpretation or driver analysis. Pairwise ρ misses
+multi-way redundancy: feature A may have ρ < 0.3 with every other feature
+individually but still be a perfect linear combination of three of them
+(VIF = ∞). The Ames Housing example: `Gr Liv Area` had moderate pairwise
+ρ values but VIF = ∞ because it equals `1st Flr SF + 2nd Flr SF + Low
+Qual Fin SF` exactly.
+
+```python
+import numpy as np
+
+def vif_table(X: pd.DataFrame) -> pd.DataFrame:
+    """VIF_j = 1 / (1 - R²_j), R²_j from regressing column j on the others."""
+    Xv = X.to_numpy(dtype=np.float64)
+    rows = []
+    for j, col in enumerate(X.columns):
+        y = Xv[:, j]
+        Xrest = np.delete(Xv, j, axis=1)
+        Xd = np.column_stack([np.ones(len(Xrest)), Xrest])
+        beta, *_ = np.linalg.lstsq(Xd, y, rcond=None)
+        yhat = Xd @ beta
+        ss_tot = ((y - y.mean()) ** 2).sum()
+        if ss_tot == 0:
+            r2, vif = 1.0, float("inf")
+        else:
+            r2 = 1 - ((y - yhat) ** 2).sum() / ss_tot
+            vif = float("inf") if r2 >= 0.9999 else 1 / (1 - r2)
+        rows.append({"feature": col, "R²_on_others": round(float(r2), 3),
+                     "VIF": round(float(vif), 2)})
+    return pd.DataFrame(rows).sort_values("VIF", ascending=False).reset_index(drop=True)
+
+vif = vif_table(df[numeric_cols].dropna())
+print(vif.to_string(index=False))
+severe   = vif.query("VIF > 10")["feature"].tolist()
+moderate = vif.query("5 < VIF <= 10")["feature"].tolist()
+if severe:
+    print(f"⚠ SEVERE multicollinearity: {severe}")
+    print("  → drop one of each redundant pair OR plan to use RidgeCV / LassoCV")
+elif moderate:
+    print(f"⚠ Moderate multicollinearity: {moderate}")
+    print("  → trust SHAP/permutation rankings over OLS β if you model later")
+```
+
+Always **report VIF as part of the EDA findings**, even if no modeling
+follows — VIF tells stakeholders whether two metrics they think are
+distinct are actually redundant. The Pre-Modeling Diagnostics section in
+`feature-importance.md` covers Ridge/Lasso fallback patterns and the full
+decision rules for VIF tiers.
+
 ## Step 6.5 — Derived-Column / Target-Leakage Check
 
 A categorical column that is strictly a function of some numeric column is a
@@ -393,6 +445,7 @@ outliers misleading) and forgetting to analyze the target's distribution.
 - [ ] Outliers reported (IQR, skipping point-mass columns)
 - [ ] Skew / kurtosis reported
 - [ ] Pairwise Spearman correlations > 0.3 reported
+- [ ] **VIF audit run; features with VIF > 5 flagged, VIF > 10 called out as severe**
 - [ ] Cardinality checked (constants and ID-like columns)
 - [ ] Target variable analyzed (if one was provided)
 

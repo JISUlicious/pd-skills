@@ -20,7 +20,11 @@ import pandas as pd, numpy as np
 print(f"pandas {pd.__version__}, numpy {np.__version__}")
 ```
 
-Install with `uv venv .venv && uv pip install pandas numpy matplotlib seaborn scipy`.
+Install with `uv venv .venv && uv pip install pandas numpy scipy plotly matplotlib seaborn`.
+Plotly is the **default visualization library** — interactive charts work in
+notebooks, web apps, and saved HTML, and stakeholders find them noticeably
+more compelling than static PNGs. Use matplotlib only for true publication-
+quality static output.
 
 **pandas 3.0 compatibility notes:**
 - CoW is always-on — do **not** set `pd.options.mode.copy_on_write`
@@ -44,7 +48,7 @@ Install with `uv venv .venv && uv pip install pandas numpy matplotlib seaborn sc
 | Resample, rolling, EWM, lag features, dates | `time-series.md` |
 | Descriptive stats, hypothesis tests, A/B tests | `statistical-analysis.md` |
 | Dtypes, PyArrow, memory, vectorization, CoW | `performance-optimization.md` |
-| Matplotlib, Seaborn, Plotly, dashboards | `visualization.md` |
+| Plotly (default), Matplotlib & Seaborn (static), dashboards | `visualization.md` |
 | Categorical, Styler, eval, nullable types, pipe | `advanced-pandas.md` |
 | XGBoost, SHAP, permutation importance, interactions, non-linear drivers | `feature-importance.md` |
 | Root-cause / defect / yield excursion / change-point / SPC / causal | `root-cause-analysis.md` |
@@ -69,6 +73,8 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 
 After completing **Explore**, verify every item in the EDA checklist at the
 end of `data-exploration.md`. Report any unchecked items to the user.
+**VIF / multicollinearity inspection is part of Explore, not a deferred
+modeling step** — see `data-exploration.md` § 6 for the integrated audit.
 
 ## Pandas Rules
 
@@ -84,9 +90,10 @@ end of `data-exploration.md`. Report any unchecked items to the user.
 - Prefer vectorized operations over `apply(axis=1)` or loops
 - Use assignment `df = df.method()` not `df.method(inplace=True)`
 - When linear analysis yields R² < 0.4 or rankings disagree, cross-check with XGBoost + SHAP (see `feature-importance.md`) before reporting drivers
-- Before reporting OLS β, run a VIF audit (`feature-importance.md` § Pre-Modeling Diagnostics) — flag features with VIF > 5; switch to RidgeCV when VIF > 10
+- **Run a VIF audit on numeric features as part of every Explore step**, before any modeling, driver analysis, or correlation interpretation — flag features with VIF > 5, switch to RidgeCV when VIF > 10 (see `data-exploration.md` § 6 / `feature-importance.md` § Pre-Modeling Diagnostics)
 - For any feature with > 1% nulls, apply the null-audit decision rules (drop / impute / indicator+impute / remove) — never silently `dropna()` before fitting
 - For RCA / excursion / defect-investigation questions, run change-point detection before regression — a localized shift in time needs a localized cause, not a global feature ranking (see `root-cause-analysis.md`)
+- **Default to Plotly** for any visualization (interactive HTML, hover, zoom). Use matplotlib/seaborn only when a static figure is explicitly required (publication, slide deck without HTML support).
 
 **Never do:**
 - Loop over rows when vectorized alternative exists

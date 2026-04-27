@@ -1,270 +1,395 @@
 # Pandas Data Visualization — Expert Skill
 
-You are an expert data analyst. Apply the following visualization patterns
-using pandas >= 2.3 built-in plotting and complementary libraries.
+You are an expert data analyst. **Plotly is the default visualization
+library.** Interactive charts (hover, zoom, click-filter, exportable to
+self-contained HTML) are markedly more compelling for stakeholders than
+static PNGs, and they cost nothing in code complexity.
 
-## Pandas Built-in Plotting
+Use **matplotlib + seaborn only when** you need:
+- Print-ready static figures for publications or papers
+- Slide decks where HTML embedding is impossible
+- Tight control over a custom layout the Plotly grammar can't express
+- Server-side image generation in environments without a browser
 
-Pandas wraps Matplotlib and provides a `.plot` accessor on DataFrames and Series.
-Always import matplotlib for fine-tuned control.
+For everything else — exploratory analysis, dashboards, internal reports,
+notebooks, web apps — Plotly is the right call.
+
+## Plotly — Default Recipes
 
 ```python
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
+import plotly.express as px
+import plotly.graph_objects as go
 ```
 
-### Line Charts (Time Series)
+### Line / Time Series
 
 ```python
-# Simple line
-df.set_index("date")["revenue"].plot(title="Daily Revenue", figsize=(12, 4))
-plt.tight_layout(); plt.show()
+# Single series
+fig = px.line(df, x="date", y="revenue", title="Daily Revenue")
+fig.show()
 
-# Multiple lines
-df.set_index("date")[["revenue", "cost", "margin"]].plot(
-    title="Financial Trends", figsize=(12, 5), linewidth=1.5
-)
-plt.ylabel("USD")
-plt.legend(loc="upper left")
-plt.tight_layout(); plt.show()
+# Multiple series with color
+fig = px.line(df, x="date", y="revenue", color="region",
+              title="Revenue by Region", markers=False)
+fig.update_layout(hovermode="x unified")           # show all series at hover
+fig.show()
+
+# With smoothed trend (rolling mean overlay)
+df_long = df.melt(id_vars="date", value_vars=["revenue", "revenue_7d"],
+                  var_name="series", value_name="value")
+fig = px.line(df_long, x="date", y="value", color="series",
+              title="Daily Revenue + 7-day Rolling Mean")
+fig.show()
 ```
 
 ### Bar Charts
 
 ```python
-# Grouped bar (category × metric)
-pivot = df.groupby(["region", "quarter"])["revenue"].sum().unstack("quarter")
-pivot.plot(kind="bar", figsize=(12, 5), width=0.8)
-plt.title("Revenue by Region and Quarter")
-plt.xticks(rotation=45, ha="right")
-plt.tight_layout(); plt.show()
+# Vertical bar
+fig = px.bar(
+    df.groupby("category", as_index=False)["revenue"].sum(),
+    x="category", y="revenue",
+    title="Revenue by Category",
+    text_auto=".2s",                               # auto-formatted labels
+)
+fig.show()
 
-# Horizontal bar (good for many categories)
-df.groupby("product")["revenue"].sum().nlargest(15).plot(kind="barh", figsize=(8, 8))
-plt.title("Top 15 Products by Revenue")
-plt.xlabel("Revenue ($)")
-plt.tight_layout(); plt.show()
+# Grouped bar (category × time)
+pivot = (df.groupby(["region", "quarter"])["revenue"].sum()
+           .reset_index())
+fig = px.bar(pivot, x="region", y="revenue", color="quarter",
+             barmode="group", text_auto=".2s",
+             title="Revenue by Region and Quarter")
+fig.show()
 
 # Stacked bar
-pivot.plot(kind="bar", stacked=True, figsize=(12, 5))
-```
+fig = px.bar(pivot, x="region", y="revenue", color="quarter",
+             barmode="stack", title="Revenue Composition by Region")
+fig.show()
 
-### Histograms & KDE
-
-```python
-# Histogram
-df["revenue"].plot(kind="hist", bins=50, edgecolor="white", figsize=(10, 5))
-plt.title("Revenue Distribution")
-plt.xlabel("Revenue")
-plt.tight_layout(); plt.show()
-
-# KDE (smooth density estimate)
-df["revenue"].plot(kind="kde", figsize=(10, 5))
-
-# Both together
-fig, ax = plt.subplots(figsize=(10, 5))
-df["revenue"].plot(kind="hist", bins=50, density=True, alpha=0.5, ax=ax)
-df["revenue"].plot(kind="kde", ax=ax, color="red", linewidth=2)
-plt.title("Revenue Distribution")
-plt.tight_layout(); plt.show()
-
-# Multiple columns
-df[["revenue", "cost"]].plot(kind="hist", bins=40, alpha=0.5, figsize=(10, 5))
-```
-
-### Box Plots & Violin Plots
-
-```python
-# Box plot by group
-df.boxplot(column="revenue", by="segment", figsize=(10, 6))
-plt.suptitle("")  # remove auto title
-plt.title("Revenue by Customer Segment")
-plt.tight_layout(); plt.show()
-
-# Pandas box plot (all numeric)
-df[["revenue", "cost", "margin"]].plot(kind="box", figsize=(8, 6))
+# Horizontal bar — best when many categories
+top_products = (df.groupby("product", as_index=False)["revenue"].sum()
+                  .nlargest(15, "revenue").sort_values("revenue"))
+fig = px.bar(top_products, x="revenue", y="product",
+             orientation="h", text_auto=".2s",
+             title="Top 15 Products by Revenue")
+fig.show()
 ```
 
 ### Scatter Plots
 
 ```python
-# Basic scatter
-df.plot(kind="scatter", x="ad_spend", y="revenue", alpha=0.3, figsize=(8, 6))
-plt.title("Ad Spend vs Revenue")
-plt.tight_layout(); plt.show()
-
-# With color encoding
-df.plot(
-    kind="scatter", x="ad_spend", y="revenue",
-    c="margin", colormap="RdYlGn", alpha=0.5,
-    figsize=(10, 6)
-)
-plt.colorbar(label="Margin")
-plt.tight_layout(); plt.show()
-```
-
-### Area Charts
-
-```python
-df.set_index("date")[["product_a", "product_b", "product_c"]].plot(
-    kind="area", stacked=True, alpha=0.7, figsize=(12, 5)
-)
-plt.title("Revenue by Product (Stacked)")
-plt.tight_layout(); plt.show()
-```
-
-## Seaborn — Statistical Visualization
-
-```python
-import seaborn as sns
-sns.set_theme(style="whitegrid")
-
-# Correlation heatmap
-corr = df[numeric_cols].corr()
-fig, ax = plt.subplots(figsize=(10, 8))
-sns.heatmap(
-    corr, annot=True, fmt=".2f", cmap="coolwarm",
-    center=0, square=True, linewidths=0.5, ax=ax
-)
-plt.title("Feature Correlation Matrix")
-plt.tight_layout(); plt.show()
-
-# Pair plot (relationships between all numeric columns)
-sns.pairplot(df[["revenue", "cost", "margin", "segment"]], hue="segment", plot_kws={"alpha": 0.4})
-plt.suptitle("Pairwise Relationships", y=1.02)
-plt.show()
-
-# Distribution by group
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-sns.histplot(data=df, x="revenue", hue="segment", kde=True, ax=axes[0])
-sns.boxplot(data=df, x="segment", y="revenue", hue="segment", legend=False, ax=axes[1])
-plt.tight_layout(); plt.show()
-
-# Violin plot (shows full distribution)
-sns.violinplot(data=df, x="region", y="revenue", hue="region", legend=False, inner="quartile")
-
-# Bar plot with confidence intervals
-sns.barplot(data=df, x="segment", y="revenue", estimator="mean", errorbar="ci")
-
-# Regression plot
-sns.regplot(data=df, x="ad_spend", y="revenue", scatter_kws={"alpha": 0.3})
-
-# Facet grid (small multiples)
-g = sns.FacetGrid(df, col="region", row="quarter", height=4)
-g.map(sns.histplot, "revenue", bins=20)
-```
-
-## Plotly — Interactive Charts
-
-```python
-import plotly.express as px
-import plotly.graph_objects as go
-
-# Interactive time series
-fig = px.line(df, x="date", y="revenue", color="region", title="Revenue Trends")
-fig.show()
-
-# Interactive bar
-fig = px.bar(
-    df.groupby("category")["revenue"].sum().reset_index(),
-    x="category", y="revenue", title="Revenue by Category",
-    text_auto=".2s"  # auto labels
-)
-fig.show()
-
-# Scatter with hover
+# Scatter with hover, color, and size encodings
 fig = px.scatter(
-    df, x="ad_spend", y="revenue", color="segment", size="margin",
-    hover_data=["product", "region"], title="Spend vs Revenue"
+    df, x="ad_spend", y="revenue",
+    color="segment", size="margin",
+    hover_data=["product", "region", "date"],
+    opacity=0.6,
+    title="Ad Spend vs Revenue (size = margin)",
+    trendline="ols",                               # built-in regression line
 )
 fig.show()
 
-# Choropleth map
-fig = px.choropleth(
-    df.groupby("country")["revenue"].sum().reset_index(),
-    locations="country", locationmode="country names",
-    color="revenue", title="Revenue by Country"
-)
-fig.show()
-
-# Treemap
-fig = px.treemap(df, path=["region", "category", "product"], values="revenue")
-fig.show()
-
-# Funnel chart
-fig = px.funnel(funnel_df, x="count", y="stage", title="Conversion Funnel")
+# Faceted scatter (small multiples)
+fig = px.scatter(df, x="ad_spend", y="revenue", color="segment",
+                 facet_col="region", facet_col_wrap=3,
+                 title="Spend vs Revenue by Region")
 fig.show()
 ```
 
-## Report-Quality Figure Templates
+### Distributions
 
 ```python
-# Professional style defaults
+# Histogram
+fig = px.histogram(df, x="revenue", nbins=50,
+                   title="Revenue Distribution")
+fig.show()
+
+# Histogram by group (overlaid or stacked)
+fig = px.histogram(df, x="revenue", color="segment",
+                   nbins=40, barmode="overlay", opacity=0.6,
+                   title="Revenue by Segment")
+fig.show()
+
+# Box plot by group
+fig = px.box(df, x="segment", y="revenue", color="segment",
+             points="outliers", title="Revenue Distribution by Segment")
+fig.show()
+
+# Violin plot — full distribution shape
+fig = px.violin(df, x="region", y="revenue", color="region",
+                box=True, points="all",
+                title="Revenue Distribution by Region")
+fig.show()
+```
+
+### Correlation Heatmap (replacement for sns.heatmap)
+
+```python
+corr = df[numeric_cols].corr().round(2)
+fig = px.imshow(
+    corr, text_auto=True, aspect="auto",
+    color_continuous_scale="RdBu_r", color_continuous_midpoint=0,
+    title="Feature Correlation Matrix",
+)
+fig.show()
+```
+
+### Geographic / Maps
+
+```python
+# Choropleth — country-level
+country_rev = df.groupby("country", as_index=False)["revenue"].sum()
+fig = px.choropleth(country_rev, locations="country",
+                    locationmode="country names", color="revenue",
+                    color_continuous_scale="Viridis",
+                    title="Revenue by Country")
+fig.show()
+
+# Scatter on map (lat/lon points)
+fig = px.scatter_geo(df, lat="lat", lon="lon", color="region", size="revenue",
+                     hover_name="city", projection="natural earth")
+fig.show()
+```
+
+### Treemap / Sunburst (hierarchical)
+
+```python
+fig = px.treemap(df, path=["region", "category", "product"],
+                 values="revenue", color="margin",
+                 color_continuous_scale="RdYlGn",
+                 title="Revenue Hierarchy")
+fig.show()
+
+fig = px.sunburst(df, path=["region", "category"], values="revenue",
+                  title="Revenue by Region → Category")
+fig.show()
+```
+
+### Funnel / Conversion
+
+```python
+funnel_df = pd.DataFrame({
+    "stage": ["Visit", "Sign-up", "Trial", "Paid"],
+    "count": [100_000, 12_000, 4_000, 800],
+})
+fig = px.funnel(funnel_df, x="count", y="stage",
+                title="Conversion Funnel")
+fig.show()
+```
+
+### Time-series with annotations
+
+```python
+fig = px.line(df, x="date", y="metric", title="Daily Metric")
+# Mark a known event
+fig.add_vline(x="2024-06-15", line_dash="dash", line_color="red",
+              annotation_text="Recipe v3 deploy", annotation_position="top")
+# Highlight a window
+fig.add_vrect(x0="2024-06-15", x1="2024-06-22",
+              fillcolor="red", opacity=0.15, line_width=0)
+fig.show()
+```
+
+### Saving / Sharing
+
+```python
+# Self-contained HTML — works in any browser, includes the data
+fig.write_html("/tmp/chart.html", include_plotlyjs="cdn")
+
+# Static export (requires `kaleido` — `uv pip install kaleido`)
+fig.write_image("/tmp/chart.png", width=1200, height=700, scale=2)
+fig.write_image("/tmp/chart.svg")                  # vector for slides
+```
+
+### Plotly Theme Defaults
+
+```python
+import plotly.io as pio
+
+pio.templates.default = "plotly_white"             # cleaner background
+# Other built-ins: "plotly_dark", "ggplot2", "seaborn", "simple_white"
+
+# Per-figure overrides (use sparingly)
+fig.update_layout(
+    font_family="Inter, sans-serif",
+    title_font_size=16,
+    legend=dict(orientation="h", y=-0.15),
+    margin=dict(l=40, r=20, t=60, b=40),
+    hovermode="closest",
+)
+```
+
+## Plotly Dashboard (Subplots)
+
+When you need a multi-panel report-style figure, use Plotly's `make_subplots`
+— still interactive, still single-HTML, no matplotlib needed:
+
+```python
+from plotly.subplots import make_subplots
+
+fig = make_subplots(
+    rows=2, cols=3,
+    subplot_titles=("Weekly Revenue", "Revenue by Region",
+                    "Margin Distribution", "Top 10 Products",
+                    "Cohort Retention", "Spend vs Revenue"),
+    specs=[[{"type": "scatter"}, {"type": "bar"},     {"type": "histogram"}],
+           [{"type": "bar"},     {"type": "heatmap"}, {"type": "scatter"}]],
+)
+
+# Top-left: weekly revenue
+weekly = df.set_index("date")["revenue"].resample("W").sum().reset_index()
+fig.add_trace(go.Scatter(x=weekly["date"], y=weekly["revenue"], mode="lines"),
+              row=1, col=1)
+
+# Top-middle: revenue by region
+region_rev = df.groupby("region", as_index=False)["revenue"].sum()
+fig.add_trace(go.Bar(x=region_rev["region"], y=region_rev["revenue"]),
+              row=1, col=2)
+
+# Top-right: margin histogram
+fig.add_trace(go.Histogram(x=df["margin"], nbinsx=40), row=1, col=3)
+
+# Bottom-left: top 10 products
+top10 = (df.groupby("product")["revenue"].sum()
+           .nlargest(10).sort_values().reset_index())
+fig.add_trace(go.Bar(x=top10["revenue"], y=top10["product"], orientation="h"),
+              row=2, col=1)
+
+# Bottom-middle: cohort retention heatmap
+fig.add_trace(go.Heatmap(z=retention.values, x=retention.columns,
+                         y=retention.index.astype(str),
+                         colorscale="YlGn"), row=2, col=2)
+
+# Bottom-right: scatter
+fig.add_trace(go.Scatter(x=df["ad_spend"], y=df["revenue"], mode="markers",
+                         marker=dict(size=4, opacity=0.3)),
+              row=2, col=3)
+
+fig.update_layout(height=900, width=1600, showlegend=False,
+                  title_text="Executive Dashboard — Q1 2024", title_x=0.5)
+fig.write_html("/tmp/dashboard.html", include_plotlyjs="cdn")
+fig.show()
+```
+
+## Static Figures — Matplotlib & Seaborn
+
+Use these only when the deliverable is a static image. The Plotly recipes
+above will cover most needs.
+
+```python
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+import seaborn as sns
+
+# Professional style defaults (apply once at the top of the script)
 plt.rcParams.update({
     "figure.dpi": 150,
     "font.family": "sans-serif",
     "axes.spines.top": False,
     "axes.spines.right": False,
-    "axes.grid": True,
-    "grid.alpha": 0.3,
-    "axes.labelsize": 12,
-    "axes.titlesize": 14,
+    "axes.grid": True, "grid.alpha": 0.3,
+    "axes.labelsize": 12, "axes.titlesize": 14,
     "legend.fontsize": 10,
 })
+sns.set_theme(style="whitegrid")
+```
 
+### Matplotlib quick patterns
+
+```python
+# Line
+df.set_index("date")["revenue"].plot(title="Daily Revenue", figsize=(12, 4))
+plt.tight_layout(); plt.savefig("revenue.png", dpi=300, bbox_inches="tight")
+
+# Bar
+(df.groupby("category")["revenue"].sum().sort_values()
+   .plot(kind="barh", figsize=(8, 6)))
+plt.title("Revenue by Category")
+plt.tight_layout(); plt.savefig("by_category.png", dpi=300, bbox_inches="tight")
+
+# Histogram + KDE
+fig, ax = plt.subplots(figsize=(10, 5))
+df["revenue"].plot(kind="hist", bins=50, density=True, alpha=0.5, ax=ax)
+df["revenue"].plot(kind="kde", ax=ax, color="red", linewidth=2)
+plt.tight_layout(); plt.savefig("dist.png", dpi=300, bbox_inches="tight")
+
+# Box plot by group
+df.boxplot(column="revenue", by="segment", figsize=(10, 6))
+plt.suptitle("")  # remove auto-added title
+plt.tight_layout(); plt.savefig("box.png", dpi=300, bbox_inches="tight")
+```
+
+### Seaborn for statistical figures
+
+```python
+# Correlation heatmap (publication style)
+corr = df[numeric_cols].corr()
+fig, ax = plt.subplots(figsize=(10, 8))
+sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
+            center=0, square=True, linewidths=0.5, ax=ax)
+plt.title("Feature Correlation Matrix")
+plt.tight_layout(); plt.savefig("corr.png", dpi=300, bbox_inches="tight")
+
+# Pairplot
+sns.pairplot(df[["revenue", "cost", "margin", "segment"]],
+             hue="segment", plot_kws={"alpha": 0.4})
+plt.savefig("pairplot.png", dpi=300, bbox_inches="tight")
+
+# Regression with confidence band
+sns.regplot(data=df, x="ad_spend", y="revenue", scatter_kws={"alpha": 0.3})
+
+# Faceted small multiples
+g = sns.FacetGrid(df, col="region", row="quarter", height=4)
+g.map(sns.histplot, "revenue", bins=20)
+g.savefig("facets.png", dpi=300, bbox_inches="tight")
+```
+
+### Static dashboard (matplotlib subplots)
+
+```python
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+fig.suptitle("Executive Dashboard — Q1 2024", fontsize=16, y=1.02)
+df.set_index("date")["revenue"].resample("W").sum().plot(ax=axes[0, 0])
+df.groupby("region")["revenue"].sum().sort_values().plot(kind="barh", ax=axes[0, 1])
+df["margin"].plot(kind="hist", bins=40, ax=axes[0, 2])
+df.groupby("product")["revenue"].sum().nlargest(10).plot(kind="barh", ax=axes[1, 0])
+sns.heatmap(retention.head(6), annot=True, fmt=".0%", ax=axes[1, 1], cmap="YlGn")
+axes[1, 2].scatter(df["ad_spend"], df["revenue"], alpha=0.2, s=10)
+plt.tight_layout()
+plt.savefig("dashboard.png", dpi=150, bbox_inches="tight")
+```
+
+### Y-axis formatters
+
+```python
 def format_yaxis_millions(ax):
     ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f"${x/1e6:.1f}M"))
 
 def format_yaxis_pct(ax):
     ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1, decimals=0))
-
-# Save high-resolution figure
-plt.savefig("chart.png", dpi=300, bbox_inches="tight", facecolor="white")
-plt.savefig("chart.svg", bbox_inches="tight")   # vector for publications
-```
-
-## Dashboard Layout
-
-```python
-# Multi-panel dashboard with matplotlib
-fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-fig.suptitle("Executive Dashboard — Q1 2024", fontsize=16, y=1.02)
-
-# Top-left: revenue trend
-df.set_index("date")["revenue"].resample("W").sum().plot(ax=axes[0, 0])
-axes[0, 0].set_title("Weekly Revenue")
-
-# Top-middle: revenue by region
-df.groupby("region")["revenue"].sum().sort_values().plot(kind="barh", ax=axes[0, 1])
-axes[0, 1].set_title("Revenue by Region")
-
-# Top-right: margin distribution
-df["margin"].plot(kind="hist", bins=40, ax=axes[0, 2])
-axes[0, 2].set_title("Margin Distribution")
-
-# Bottom-left: top products
-df.groupby("product")["revenue"].sum().nlargest(10).plot(kind="barh", ax=axes[1, 0])
-axes[1, 0].set_title("Top 10 Products")
-
-# Bottom-middle: monthly cohort retention
-sns.heatmap(retention.head(6), annot=True, fmt=".0%", ax=axes[1, 1], cmap="YlGn")
-axes[1, 1].set_title("Cohort Retention")
-
-# Bottom-right: scatter
-axes[1, 2].scatter(df["ad_spend"], df["revenue"], alpha=0.2, s=10)
-axes[1, 2].set_title("Ad Spend vs Revenue")
-
-plt.tight_layout()
-plt.savefig("dashboard.png", dpi=150, bbox_inches="tight")
-plt.show()
 ```
 
 ## Visualization Best Practices
 
-- **Choose the right chart:** line for trends, bar for comparison, scatter for correlation, histogram for distribution
-- **Label everything:** title, axis labels, units, data source
-- **Color intentionally:** use sequential (blues) for quantity, diverging (RdBu) for deviation, qualitative for categories
-- **Avoid chartjunk:** remove top/right spines, use light gridlines, no 3D effects
-- **Accessibility:** use colorblind-safe palettes (e.g., seaborn "colorblind" or "tab10")
-- **Interactivity:** use Plotly for exploratory analysis, matplotlib for publication figures
-- **Consistent scale:** don't truncate y-axis to exaggerate differences unless intentional
+- **Default to Plotly.** Stakeholders interact with hover and zoom; static
+  PNGs feel inert by comparison.
+- **Choose the right chart:** line for trends, bar for comparison, scatter
+  for correlation, histogram for distribution, box/violin for distribution
+  comparison across groups, heatmap for matrix data, treemap for
+  hierarchical proportions.
+- **Label everything:** title, axis labels, units, data source. Plotly
+  hover labels reduce the need for in-figure annotations but don't replace
+  axis labels.
+- **Color intentionally:** sequential (blues / Viridis) for quantity,
+  diverging (RdBu) for deviation around a midpoint, qualitative (Tab10)
+  for categories. Plotly's `color_continuous_midpoint=0` for diverging
+  scales is essential when data spans positive and negative.
+- **Avoid chartjunk:** no 3D effects, no gratuitous gradients. Plotly's
+  `plotly_white` template strips most defaults.
+- **Accessibility:** use colorblind-safe palettes (`px.colors.qualitative.Safe`,
+  Plotly's "Viridis", or seaborn "colorblind"). Avoid red/green only.
+- **Save HTML for sharing:** `fig.write_html(..., include_plotlyjs="cdn")`
+  produces a self-contained file under 50 KB that works in any browser.
+- **Never auto-open** dozens of `fig.show()` calls in a script — write to
+  files instead, then list the paths in the report.
