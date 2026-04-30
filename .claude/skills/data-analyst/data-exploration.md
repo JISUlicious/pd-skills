@@ -269,6 +269,163 @@ distinct are actually redundant. The Pre-Modeling Diagnostics section in
 `feature-importance.md` covers Ridge/Lasso fallback patterns and the full
 decision rules for VIF tiers.
 
+### Mixed-type collinearity — when categoricals exist
+
+Numeric-only VIF is **incomplete on real datasets**. Many numeric columns
+are *bound* to categorical columns: when a categorical encodes "feature
+present?" and a related numeric encodes "feature magnitude," they carry
+the same binary signal even though their pairwise ρ looks moderate.
+
+The Ames Housing case: `Garage Yr Blt` (numeric) and `Garage Finish`
+(categorical) have **η² = 0.998** — practically deterministic. Both are
+"absent" together when there's no garage. Numeric-only VIF rates
+`Garage Yr Blt` at VIF ≈ 1, completely missing this. With one-hot
+expansion the design-matrix VIF jumps to 1614.
+
+Run **two checks** to cover the gap:
+
+#### A. Mixed-type VIF — design matrix with one-hot dummies
+
+```python
+def mixed_type_vif(X, num_cols, cat_cols, max_cardinality=15):
+    """VIF on the full design matrix (numeric + one-hot dummies of categoricals).
+
+    drop_first=True is required — without it dummies of one categorical sum
+    to 1 and are perfectly collinear by construction.
+
+    High-cardinality categoricals (> max_cardinality levels) bloat the design
+    matrix and rarely yield interpretable per-dummy VIFs; skip them and use
+    cross_type_binding() for those instead.
+
+    Returns:
+      per_source:  DataFrame with [source, max_VIF, mean_VIF, n_features]
+      per_feature: DataFrame with [feature, source, R²_on_others, VIF]
+    """
+    cat_low = [c for c in cat_cols if X[c].nunique() <= max_cardinality]
+    cat_skip = [c for c in cat_cols if c not in cat_low]
+    if cat_skip:
+        print(f"Skipped {len(cat_skip)} high-cardinality cats from VIF "
+              f"(use cross_type_binding instead): {cat_skip[:5]}"
+              f"{'...' if len(cat_skip) > 5 else ''}")
+
+    X_design = pd.get_dummies(X[num_cols + cat_low], columns=cat_low,
+                              drop_first=True, dtype="float64")
+    per_feature = vif_table(X_design)
+
+    source_map = {c: c for c in num_cols}
+    for src in cat_low:
+        prefix = f"{src}_"
+        for c in X_design.columns:
+            if c.startswith(prefix):
+                source_map[c] = src
+    per_feature["source"] = per_feature["feature"].map(source_map)
+
+    per_source = (per_feature.groupby("source")
+                  .agg(max_VIF=("VIF", "max"),
+                       mean_VIF=("VIF", "mean"),
+                       n_features=("feature", "count"))
+                  .sort_values("max_VIF", ascending=False)
+                  .reset_index())
+    return per_source, per_feature
+
+per_source, per_feature = mixed_type_vif(df, numeric_cols, categorical_cols)
+print(per_source.head(20).round(2).to_string(index=False))
+new_severe = per_source.query("max_VIF > 10")["source"].tolist()
+print(f"\nSources with severe design-matrix VIF: {new_severe}")
+```
+
+**Caveat — VIF=∞ from shared structural-absence levels:** when several
+categoricals share a "None" level for the same physical absence (e.g.
+`Bsmt Qual_None`, `Bsmt Cond_None`, `BsmtFin Type 1_None` in Ames are
+all 1 for properties with no basement), their dummies become perfectly
+collinear by construction. Report this as "X features carry the
+same 'is absent?' signal" rather than as N independent multicollinear
+sources.
+
+#### B. Cross-type binding — η² and Cramér's V
+
+For high-cardinality categoricals (skipped from VIF) and as a complement
+that's easier to interpret across types, compute pairwise associations:
+
+```python
+from scipy import stats
+
+def cross_type_binding(X, num_cols, cat_cols, threshold=0.5):
+    """Detect strong bindings between columns, including across types.
+
+    Returns DataFrame with columns [a, b, score, kind] for pairs above
+    threshold:
+      - num↔cat:  score = η²  (variance in num explained by cat groups)
+      - cat↔cat:  score = Cramér's V
+      - num↔num:  score = ρ²  (Spearman, only if > threshold)
+    """
+    rows = []
+
+    # numeric ↔ categorical: η²
+    for n in num_cols:
+        for c in cat_cols:
+            d = pd.DataFrame({"x": X[n], "g": X[c]}).dropna()
+            if len(d) < 5 or d["g"].nunique() < 2:
+                continue
+            grand = d["x"].mean()
+            ss_tot = ((d["x"] - grand) ** 2).sum()
+            if ss_tot == 0:
+                continue
+            ss_btw = (d.groupby("g", observed=True)["x"]
+                       .apply(lambda s: len(s) * (s.mean() - grand) ** 2)
+                       .sum())
+            eta2 = float(ss_btw / ss_tot)
+            if eta2 > threshold:
+                rows.append({"a": n, "b": c, "score": round(eta2, 3),
+                             "kind": "η² (num↔cat)"})
+
+    # categorical ↔ categorical: Cramér's V
+    for i, a in enumerate(cat_cols):
+        for b in cat_cols[i + 1:]:
+            d = pd.DataFrame({"a": X[a], "b": X[b]}).dropna()
+            if len(d) < 5 or d["a"].nunique() < 2 or d["b"].nunique() < 2:
+                continue
+            ct = pd.crosstab(d["a"], d["b"])
+            chi2, *_ = stats.chi2_contingency(ct)
+            n = ct.sum().sum()
+            denom = n * max(min(ct.shape) - 1, 1)
+            v = float(np.sqrt(chi2 / denom)) if denom > 0 else 0.0
+            if v > threshold:
+                rows.append({"a": a, "b": b, "score": round(v, 3),
+                             "kind": "Cramér's V (cat↔cat)"})
+
+    # numeric ↔ numeric: ρ² (only if exceeds threshold)
+    for i, a in enumerate(num_cols):
+        for b in num_cols[i + 1:]:
+            rho = X[[a, b]].corr(method="spearman").iloc[0, 1]
+            if pd.notna(rho) and rho * rho > threshold:
+                rows.append({"a": a, "b": b, "score": round(rho * rho, 3),
+                             "kind": "ρ² (num↔num)"})
+
+    return (pd.DataFrame(rows)
+              .sort_values("score", ascending=False)
+              .reset_index(drop=True))
+
+bindings = cross_type_binding(df, numeric_cols, categorical_cols, threshold=0.5)
+print(bindings.head(20).to_string(index=False))
+```
+
+#### Decision rule
+
+| Situation | Use |
+|---|---|
+| Numeric-only dataset | `vif_table(X)` is sufficient |
+| Mixed numeric + low-cardinality categorical | `mixed_type_vif()` for source-level VIF |
+| High-cardinality categoricals present (>15 levels) | `cross_type_binding()` for those |
+| Quick "is there cross-type redundancy at all?" check | `cross_type_binding(threshold=0.5)` — single call |
+| Production diagnostic | All three; report any source with max VIF > 10 OR any binding score > 0.7 |
+
+**Rule of thumb:** η² > 0.5 between a numeric and a categorical means the
+numeric carries no signal beyond the categorical group means — drop one
+side before modeling. η² > 0.9 means deterministic binding (e.g. Ames
+`Pool Area` ↔ `Pool QC` at η² = 0.94 — Pool Area is 0 exactly when
+Pool QC is "None").
+
 ### Selecting cluster representatives — when you must drop one
 
 When VIF flags a multicollinear cluster and the downstream method can't
@@ -604,7 +761,8 @@ outliers misleading) and forgetting to analyze the target's distribution.
 - [ ] Outliers reported (IQR, skipping point-mass columns)
 - [ ] Skew / kurtosis reported
 - [ ] Pairwise Spearman correlations > 0.3 reported
-- [ ] **VIF audit run; features with VIF > 5 flagged, VIF > 10 called out as severe**
+- [ ] **VIF audit run on numeric features; VIF > 5 flagged, VIF > 10 severe**
+- [ ] **Mixed-type collinearity audit when categoricals present** — `mixed_type_vif()` per-source max VIF, `cross_type_binding()` η²/Cramér's V; pairs with η² > 0.5 or score > 0.7 reported
 - [ ] Cardinality checked (constants and ID-like columns)
 - [ ] Target variable analyzed (if one was provided)
 

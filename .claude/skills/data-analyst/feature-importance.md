@@ -558,6 +558,7 @@ worthless. Check for each one before reporting.
 | Dropping rows with nulls when missingness correlates with target | Sample becomes biased; β reflects only respondents who answered | Run `null_audit()`; if `miss_target_rho >= 0.05`, use indicator+impute, never drop |
 | Reporting OLS β when VIF > 10 | β values flip sign or change magnitude across re-runs | Drop one of the redundant pair, OR switch to RidgeCV |
 | "Most important feature" is itself a rating-summary | Top driver is `OverallQual`/`Score`/`Rating` while per-component ratings (`KitchenQual`, `ExterQual`, …) sit just behind | Surface the redundancy: report the rating cluster as one composite, or run an importance pass with the summary feature removed to see what fills its place |
+| Reporting numeric-only VIF when categoricals exist | A numeric column with VIF ≈ 1 is silently bound to a categorical (e.g. Ames `Garage Yr Blt` ↔ `Garage Finish` at η² = 0.998) — its β looks meaningful but is uninterpretable | Run `mixed_type_vif()` and `cross_type_binding()` from `data-exploration.md` § 6; treat any source with max design-matrix VIF > 10 OR pairwise η² > 0.7 as collinear |
 
 The **first** anti-pattern is the most common in EDA: when the target is
 a survey scale or composite (stress, satisfaction, NPS, mental health

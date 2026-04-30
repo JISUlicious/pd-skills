@@ -268,6 +268,161 @@ elif moderate:
 실제로는 중복인지 알려줍니다. `feature-importance.md`의 모델링 사전 진단 섹션은
 Ridge/Lasso 폴백 패턴과 VIF 등급에 대한 전체 결정 규칙을 다룹니다.
 
+### 혼합 타입 다중공선성 — 범주형이 존재할 때
+
+수치형만 사용하는 VIF는 **실제 데이터셋에서는 불완전합니다**. 많은
+수치형 칼럼이 범주형 칼럼에 *결합(bound)*되어 있습니다. 범주형이 "이
+피처가 존재하는가?"를 인코딩하고 관련된 수치형이 "피처 크기"를
+인코딩할 때, 쌍별 ρ가 중간 정도로 보여도 두 칼럼은 같은 이진 신호를
+공유합니다.
+
+Ames Housing 사례: `Garage Yr Blt` (수치형)과 `Garage Finish`
+(범주형)는 **η² = 0.998** — 거의 결정론적입니다. 차고가 없을 때 둘 다
+"부재" 상태가 됩니다. 수치형만 사용하는 VIF는 `Garage Yr Blt`를
+VIF ≈ 1로 평가하여 이 결합을 완전히 놓칩니다. 원-핫 확장과 함께
+설계 행렬 VIF를 계산하면 1614까지 치솟습니다.
+
+이 격차를 메우기 위해 **두 가지 점검**을 실행합니다:
+
+#### A. 혼합 타입 VIF — 원-핫 더미를 포함한 설계 행렬
+
+```python
+def mixed_type_vif(X, num_cols, cat_cols, max_cardinality=15):
+    """전체 설계 행렬(수치형 + 범주형의 원-핫 더미)에 대한 VIF.
+
+    drop_first=True 필수 — 그렇지 않으면 한 범주형의 더미들이 합 = 1로
+    구성상 완벽히 공선입니다.
+
+    높은 카디널리티 범주형(> max_cardinality 수준)은 설계 행렬을
+    과도하게 키우고 더미별 VIF의 해석이 어렵습니다. 이런 경우는
+    cross_type_binding()을 사용하세요.
+
+    반환:
+      per_source:  [source, max_VIF, mean_VIF, n_features]
+      per_feature: [feature, source, R²_on_others, VIF]
+    """
+    cat_low = [c for c in cat_cols if X[c].nunique() <= max_cardinality]
+    cat_skip = [c for c in cat_cols if c not in cat_low]
+    if cat_skip:
+        print(f"Skipped {len(cat_skip)} high-cardinality cats from VIF "
+              f"(use cross_type_binding instead): {cat_skip[:5]}"
+              f"{'...' if len(cat_skip) > 5 else ''}")
+
+    X_design = pd.get_dummies(X[num_cols + cat_low], columns=cat_low,
+                              drop_first=True, dtype="float64")
+    per_feature = vif_table(X_design)
+
+    source_map = {c: c for c in num_cols}
+    for src in cat_low:
+        prefix = f"{src}_"
+        for c in X_design.columns:
+            if c.startswith(prefix):
+                source_map[c] = src
+    per_feature["source"] = per_feature["feature"].map(source_map)
+
+    per_source = (per_feature.groupby("source")
+                  .agg(max_VIF=("VIF", "max"),
+                       mean_VIF=("VIF", "mean"),
+                       n_features=("feature", "count"))
+                  .sort_values("max_VIF", ascending=False)
+                  .reset_index())
+    return per_source, per_feature
+
+per_source, per_feature = mixed_type_vif(df, numeric_cols, categorical_cols)
+print(per_source.head(20).round(2).to_string(index=False))
+new_severe = per_source.query("max_VIF > 10")["source"].tolist()
+print(f"\nSources with severe design-matrix VIF: {new_severe}")
+```
+
+**유의사항 — 공유된 구조적 부재(structural-absence) 수준에서 오는
+VIF=∞:** 여러 범주형이 같은 물리적 부재에 대해 "None" 수준을 공유할
+때(예: Ames의 `Bsmt Qual_None`, `Bsmt Cond_None`, `BsmtFin Type 1_None`은
+지하실이 없는 부동산에서 모두 1), 그 더미들은 구성상 완벽히
+공선이 됩니다. 이는 N개의 독립적 다중공선성 소스가 아니라 "X개의
+피처가 같은 '부재' 신호를 가진다"로 보고하세요.
+
+#### B. 교차 타입 결합(cross-type binding) — η²와 Cramér's V
+
+VIF에서 제외된 높은 카디널리티 범주형, 그리고 타입 간 해석이 더 쉬운
+보완책으로 쌍별 연관성을 계산합니다:
+
+```python
+from scipy import stats
+
+def cross_type_binding(X, num_cols, cat_cols, threshold=0.5):
+    """타입 경계를 넘는 강한 결합 탐지.
+
+    임계값을 초과하는 쌍에 대해 [a, b, score, kind] 칼럼의 DataFrame 반환:
+      - num↔cat:  score = η²  (수치형 분산 중 범주 그룹 평균이 설명하는 부분)
+      - cat↔cat:  score = Cramér's V
+      - num↔num:  score = ρ²  (Spearman, 임계값 초과 시에만)
+    """
+    rows = []
+
+    # 수치형 ↔ 범주형: η²
+    for n in num_cols:
+        for c in cat_cols:
+            d = pd.DataFrame({"x": X[n], "g": X[c]}).dropna()
+            if len(d) < 5 or d["g"].nunique() < 2:
+                continue
+            grand = d["x"].mean()
+            ss_tot = ((d["x"] - grand) ** 2).sum()
+            if ss_tot == 0:
+                continue
+            ss_btw = (d.groupby("g", observed=True)["x"]
+                       .apply(lambda s: len(s) * (s.mean() - grand) ** 2)
+                       .sum())
+            eta2 = float(ss_btw / ss_tot)
+            if eta2 > threshold:
+                rows.append({"a": n, "b": c, "score": round(eta2, 3),
+                             "kind": "η² (num↔cat)"})
+
+    # 범주형 ↔ 범주형: Cramér's V
+    for i, a in enumerate(cat_cols):
+        for b in cat_cols[i + 1:]:
+            d = pd.DataFrame({"a": X[a], "b": X[b]}).dropna()
+            if len(d) < 5 or d["a"].nunique() < 2 or d["b"].nunique() < 2:
+                continue
+            ct = pd.crosstab(d["a"], d["b"])
+            chi2, *_ = stats.chi2_contingency(ct)
+            n = ct.sum().sum()
+            denom = n * max(min(ct.shape) - 1, 1)
+            v = float(np.sqrt(chi2 / denom)) if denom > 0 else 0.0
+            if v > threshold:
+                rows.append({"a": a, "b": b, "score": round(v, 3),
+                             "kind": "Cramér's V (cat↔cat)"})
+
+    # 수치형 ↔ 수치형: ρ² (임계값 초과 시에만)
+    for i, a in enumerate(num_cols):
+        for b in num_cols[i + 1:]:
+            rho = X[[a, b]].corr(method="spearman").iloc[0, 1]
+            if pd.notna(rho) and rho * rho > threshold:
+                rows.append({"a": a, "b": b, "score": round(rho * rho, 3),
+                             "kind": "ρ² (num↔num)"})
+
+    return (pd.DataFrame(rows)
+              .sort_values("score", ascending=False)
+              .reset_index(drop=True))
+
+bindings = cross_type_binding(df, numeric_cols, categorical_cols, threshold=0.5)
+print(bindings.head(20).to_string(index=False))
+```
+
+#### 결정 규칙
+
+| 상황 | 사용 |
+|---|---|
+| 수치형만 있는 데이터셋 | `vif_table(X)`로 충분 |
+| 수치형 + 낮은 카디널리티 범주형 혼합 | `mixed_type_vif()`로 소스 단위 VIF |
+| 높은 카디널리티 범주형 존재 (>15 수준) | 그 칼럼들에는 `cross_type_binding()` |
+| "타입 간 중복이 있는가?" 빠른 점검 | `cross_type_binding(threshold=0.5)` 한 번 호출 |
+| 프로덕션 진단 | 셋 다; max VIF > 10인 소스 OR 결합 점수 > 0.7인 모든 소스를 보고 |
+
+**경험칙:** 수치형과 범주형 사이의 η² > 0.5는 그 수치형이 범주형 그룹
+평균을 넘어 어떤 신호도 가지지 않음을 뜻합니다 — 모델링 전에 한쪽을
+제거하세요. η² > 0.9는 결정론적 결합을 의미합니다 (예: Ames `Pool Area`
+↔ `Pool QC` η² = 0.94 — Pool QC가 "None"일 때 Pool Area는 정확히 0).
+
 ### 클러스터 대표 선택 — 하나를 제거해야 할 때
 
 VIF가 다중공선 클러스터를 표시하고 후속 방법론이 이를 허용할 수 없을 때(OLS
@@ -602,7 +757,8 @@ df["category"].value_counts().plot(kind="bar")
 - [ ] 이상치 보고됨 (IQR, 포인트 매스 칼럼은 건너뜀)
 - [ ] 왜도 / 첨도 보고됨
 - [ ] 쌍별 Spearman 상관계수 > 0.3 보고됨
-- [ ] **VIF 감사 실행됨; VIF > 5인 피처는 표시되고, VIF > 10은 심각으로 적시됨**
+- [ ] **수치형 피처에 VIF 감사 실행; VIF > 5 표시, VIF > 10 심각으로 적시**
+- [ ] **범주형이 존재하면 혼합 타입 다중공선성 감사** — `mixed_type_vif()` 소스별 max VIF, `cross_type_binding()` η²/Cramér's V; η² > 0.5 또는 점수 > 0.7인 쌍 보고
 - [ ] 카디널리티 검사됨 (상수 및 ID 유사 칼럼)
 - [ ] 타겟 변수 분석됨 (제공된 경우)
 
