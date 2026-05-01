@@ -1,0 +1,16 @@
+{
+  "name": "pd-skills",
+  "metadata": {
+    "pluginRoot": "."
+  },
+  "plugins": [
+    {
+      "name": "pd-skills",
+      "source": ".",
+      "skills": [
+        "./.claude/skills/data-analyst",
+        "./.claude/skills/data-analyst-ko"
+      ]
+    }
+  ]
+}

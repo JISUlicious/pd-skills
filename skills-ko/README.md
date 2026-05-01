@@ -60,22 +60,26 @@ git add skills-ko/data-analyst/data-exploration.md
 git commit -m "Sync Korean translation: <영문 원본 commit hash>"
 ```
 
-## 활성 스킬로 사용하려면
+## 활성 스킬과의 관계
 
-이 디렉터리는 **참고용 번역**이며, Claude Code 스킬로 자동 발견되지
-않습니다(`.claude/skills/` 하위에만 자동 발견됨). 한국어 본을 활성
-스킬로 사용하려면:
+이 디렉터리는 한국어 번역의 **소스 오브 트루스(source of truth)**입니다.
+번역 작업은 항상 여기서 수행하고, 그 결과를 활성 스킬 위치로 동기화합니다.
+
+활성 스킬은 `.claude/skills/data-analyst-ko/`에 있으며 (영문판
+`data-analyst`와 별도 스킬로 자동 등록됨), `skills-ko/data-analyst/`의
+복제본입니다. 두 경로의 파일은 byte-identical로 유지되어야 합니다.
 
 ```bash
-# 옵션 1: 영문 본을 한국어 본으로 교체 (한 번에 한 언어만 활성)
-cp -r skills-ko/data-analyst/* .claude/skills/data-analyst/
+# skills-ko/ 에서 번역 변경을 마친 뒤
+rsync -a skills-ko/data-analyst/ .claude/skills/data-analyst-ko/
 
-# 옵션 2: 별도 스킬로 등록 (양쪽 동시 활성, name 충돌 방지를 위해
-# SKILL.md frontmatter의 name을 변경 필요)
-mkdir -p .claude/skills/data-analyst-ko
-cp -r skills-ko/data-analyst/* .claude/skills/data-analyst-ko/
-# SKILL.md의 name을 'data-analyst-ko'로 수정
+# .claude/skills/data-analyst-ko/SKILL.md의 frontmatter는 'data-analyst-ko'로
+# 유지 — 영문판과의 name 충돌 방지를 위함
 ```
+
+영문 원본이 업데이트되면 (1) `skills-ko/data-analyst/`의 해당 파일에
+번역 diff를 적용하고, (2) `.claude/skills/data-analyst-ko/`로 동기화하는
+순서로 작업합니다.
 
 ## 용어 일관성 사전(요약)
 
