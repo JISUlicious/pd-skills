@@ -67,15 +67,20 @@ git commit -m "Sync Korean translation: <영문 원본 commit hash>"
 
 활성 스킬은 `.claude/skills/data-analyst-ko/`에 있으며 (영문판
 `data-analyst`와 별도 스킬로 자동 등록됨), `skills-ko/data-analyst/`의
-복제본입니다. 두 경로의 파일은 byte-identical로 유지되어야 합니다.
+완전 복제본입니다. 두 경로의 파일은 byte-identical로 유지됩니다.
 
 ```bash
 # skills-ko/ 에서 번역 변경을 마친 뒤
 rsync -a skills-ko/data-analyst/ .claude/skills/data-analyst-ko/
-
-# .claude/skills/data-analyst-ko/SKILL.md의 frontmatter는 'data-analyst-ko'로
-# 유지 — 영문판과의 name 충돌 방지를 위함
 ```
+
+**SKILL.md frontmatter의 의도된 영문 원본과의 차이 (1줄):**
+- 영문 원본 `name: data-analyst` → 한국어 `name: data-analyst-ko`
+  (영문판과의 자동 발견 name 충돌 방지)
+- description 문자열도 한국어판임을 표시하기 위해 "(한국어판)" 표기 포함
+
+이 두 차이는 `skills-ko/data-analyst/SKILL.md`에 이미 반영되어 있어
+별도 스크립트 없이 단순 rsync로 동기화할 수 있습니다.
 
 영문 원본이 업데이트되면 (1) `skills-ko/data-analyst/`의 해당 파일에
 번역 diff를 적용하고, (2) `.claude/skills/data-analyst-ko/`로 동기화하는

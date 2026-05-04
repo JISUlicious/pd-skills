@@ -76,6 +76,71 @@ end of `data-exploration.md`. Report any unchecked items to the user.
 **VIF / multicollinearity inspection is part of Explore, not a deferred
 modeling step** — see `data-exploration.md` § 6 for the integrated audit.
 
+## Pre-Modeling Diagnostics (mandatory)
+
+These audits run during **Explore**, before any modeling, driver analysis,
+or correlation interpretation. Each catches a class of silent failure that
+otherwise propagates into wrong conclusions. **Skipping any of them is the
+most common EDA failure mode.**
+
+### 1. Collinearity audit — three layers
+
+| Audit | When to run | Helper | Threshold |
+|---|---|---|---|
+| Numeric VIF | Always | `vif_table(X[num_cols])` | VIF > 5 moderate, > 10 severe |
+| Mixed-type VIF | When categoricals exist | `mixed_type_vif(X, num_cols, cat_cols)` | per-source max VIF > 10 severe |
+| Cross-type binding | When categoricals exist | `cross_type_binding(X, num_cols, cat_cols)` | η² or Cramér's V > 0.5 bound |
+
+Numeric-only VIF silently misses bindings between numeric and categorical
+columns (e.g. Ames `Garage Yr Blt` ↔ `Garage Finish` η² = 0.998 — the
+numeric is undefined when the categorical is "None"). Always run all three
+when the dataset has both types.
+
+When VIF is severe and the downstream method can't tolerate it, use
+`select_cluster_representative()` (priority-ordered: aggregate → summary
+name → score-by-context → completeness → variance → ambiguous-flag) to
+pick which feature to keep. See `data-exploration.md` § 6.
+
+### 2. Null-handling audit (dtype-aware)
+
+Run `null_audit(X, y)` per column, **never blanket `dropna()`**. The audit
+picks the right association measure by target dtype: Spearman ρ for
+numeric, point-biserial r for binary, Cramér's V for multiclass.
+
+| null_pct | \|miss-target assoc\| | Action |
+|---:|---:|---|
+| < 1% | any | drop rows |
+| 1–10% | < 0.05 | median-impute (warn about R² attenuation) |
+| 1–10% | ≥ 0.05 | **informative missingness** — indicator + impute |
+| 10–50% | any | indicator + impute |
+| > 50% | any | drop the column ("too sparse to model") |
+
+See `feature-importance.md` § 2.
+
+### 3. Target skew check (regression only)
+
+```python
+if y.skew() > 1 and (y > 0).all():
+    y_model = np.log1p(y)
+```
+
+Report both raw-target and transformed-target R². Translate log-space MAE
+back to the original units (e.g. dollars) for stakeholders. See
+`feature-importance.md` § 1b.
+
+### 4. Tautology / leakage check
+
+- **Rating-summary tautology:** if the top driver is itself a summary
+  (`OverallQual`, `Score`, `Rating`) and per-component ratings sit just
+  behind, refit without it. If R² barely drops, it was a redundant rollup
+  — report the cluster, not the summary. (Ames example: dropping
+  `Overall Qual` *increased* R² by 0.001 — components carried all the signal.)
+- **Post-outcome leakage:** drop any variable computed from or after the
+  target before fitting (e.g. predicting `stress_level` with
+  `mental_health_index` in the same instrument).
+
+See `feature-importance.md` § Anti-Patterns / Leakage.
+
 ## Pandas Rules
 
 **Always do:**
@@ -89,9 +154,8 @@ modeling step** — see `data-exploration.md` § 6 for the integrated audit.
 - Use `Int64` (nullable) not `int64` when column can have NaN
 - Prefer vectorized operations over `apply(axis=1)` or loops
 - Use assignment `df = df.method()` not `df.method(inplace=True)`
+- Run **all four Pre-Modeling Diagnostics** (collinearity / null / skew / tautology — see section above) during Explore, before any modeling
 - When linear analysis yields R² < 0.4 or rankings disagree, cross-check with XGBoost + SHAP (see `feature-importance.md`) before reporting drivers
-- **Run a VIF audit on numeric features as part of every Explore step**, before any modeling, driver analysis, or correlation interpretation — flag features with VIF > 5, switch to RidgeCV when VIF > 10 (see `data-exploration.md` § 6 / `feature-importance.md` § Pre-Modeling Diagnostics)
-- For any feature with > 1% nulls, apply the null-audit decision rules (drop / impute / indicator+impute / remove) — never silently `dropna()` before fitting
 - For RCA / excursion / defect-investigation questions, run change-point detection before regression — a localized shift in time needs a localized cause, not a global feature ranking (see `root-cause-analysis.md`)
 - **Default to Plotly** for any visualization (interactive HTML, hover, zoom). Use matplotlib/seaborn only when a static figure is explicitly required (publication, slide deck without HTML support).
 

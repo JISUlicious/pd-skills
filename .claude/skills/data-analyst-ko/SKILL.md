@@ -77,6 +77,69 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 **VIF / 다중공선성 점검은 Explore 단계의 일부이며 모델링으로 미루는
 단계가 아닙니다** — 통합 감사 절차는 `data-exploration.md` § 6 참조.
 
+## 모델링 전 진단 (필수)
+
+이 감사들은 **Explore** 중에, 모델링 / 드라이버 분석 / 상관 해석에
+앞서 실행됩니다. 각 항목은 잘못된 결론으로 전파될 수 있는 무음 실패
+유형을 잡아냅니다. **이 중 하나라도 건너뛰는 것이 가장 흔한 EDA 실패
+모드입니다.**
+
+### 1. 다중공선성 감사 — 세 단계
+
+| 감사 | 실행 시점 | 헬퍼 | 임계값 |
+|---|---|---|---|
+| 수치형 VIF | 항상 | `vif_table(X[num_cols])` | VIF > 5 중간, > 10 심각 |
+| 혼합 타입 VIF | 범주형 존재 시 | `mixed_type_vif(X, num_cols, cat_cols)` | 소스별 max VIF > 10 심각 |
+| 교차 타입 결합 | 범주형 존재 시 | `cross_type_binding(X, num_cols, cat_cols)` | η² 또는 Cramér's V > 0.5 결합 |
+
+수치형만 사용하는 VIF는 수치형 칼럼과 범주형 칼럼 사이의 결합을 무음으로
+놓칩니다 (예: Ames `Garage Yr Blt` ↔ `Garage Finish` η² = 0.998 — 범주형이
+"None"일 때 수치형은 정의되지 않음). 두 타입이 모두 존재하는 데이터셋에서는
+세 가지를 모두 실행하세요.
+
+VIF가 심각하고 후속 메서드가 이를 견딜 수 없을 때, `select_cluster_representative()`
+(우선순위: 집계 → 요약 이름 → 컨텍스트별 점수 → 완전성 → 분산 →
+모호 플래그)로 어떤 피처를 유지할지 선택합니다. `data-exploration.md` § 6 참조.
+
+### 2. 결측 처리 감사 (dtype 인식)
+
+`null_audit(X, y)`를 칼럼별로 실행하세요. **블랭킷 `dropna()`는 절대
+금지**입니다. 감사는 타겟 dtype에 따라 적절한 연관성 측도를 선택합니다:
+수치형은 Spearman ρ, 이진형은 점이연 r, 다클래스는 Cramér's V.
+
+| null_pct | \|miss-target assoc\| | 조치 |
+|---:|---:|---|
+| < 1% | 무관 | 행 제거 |
+| 1–10% | < 0.05 | 중앙값 대체 (R² 감쇄 경고) |
+| 1–10% | ≥ 0.05 | **정보 있는 결측** — 지시자 + 대체 |
+| 10–50% | 무관 | 지시자 + 대체 |
+| > 50% | 무관 | 칼럼 제거 ("모델링에 너무 희소함") |
+
+`feature-importance.md` § 2 참조.
+
+### 3. 타겟 왜도 점검 (회귀 전용)
+
+```python
+if y.skew() > 1 and (y > 0).all():
+    y_model = np.log1p(y)
+```
+
+원본 타겟과 변환된 타겟의 R²를 모두 보고. 로그 공간 MAE를 이해관계자를
+위해 원본 단위(예: 달러)로 변환. `feature-importance.md` § 1b 참조.
+
+### 4. 동어반복 / 누수 점검
+
+- **등급-요약 동어반복:** 상위 드라이버가 자체로 요약(`OverallQual`,
+  `Score`, `Rating`)이고 구성 요소 등급이 바로 뒤에 있다면, 그것을
+  제외하고 재적합. R²가 거의 떨어지지 않으면 중복 롤업입니다 — 클러스터를
+  보고하고 요약은 보고하지 마세요. (Ames 예: `Overall Qual`을 제거했을 때
+  R²가 *오히려* 0.001 증가 — 구성 요소가 모든 신호를 가졌음.)
+- **결과 이후 누수:** 적합 전에 타겟에서 계산되거나 타겟 이후의 변수는
+  모두 제거 (예: 같은 도구의 `mental_health_index`로 `stress_level`을
+  예측).
+
+`feature-importance.md` § 안티패턴 / 누수 참조.
+
 ## pandas 규칙
 
 **항상 해야 할 것:**
@@ -90,14 +153,10 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 - NaN 가능 칼럼에는 `int64` 대신 `Int64` (nullable) 사용
 - `apply(axis=1)`이나 루프보다 벡터화 연산 선호
 - `df.method(inplace=True)`가 아닌 `df = df.method()` 대입 사용
+- 모든 **모델링 전 4가지 진단**(다중공선성 / 결측 / 왜도 / 동어반복 —
+  위 섹션 참조)을 Explore 중에 실행, 모델링 이전에
 - 선형 분석의 R² < 0.4이거나 순위가 일치하지 않으면, 드라이버 보고 전에
   XGBoost + SHAP로 교차 검증 (`feature-importance.md` 참조)
-- **모든 Explore 단계의 일부로 수치형 피처에 VIF 감사 실행**, 모델링,
-  드라이버 분석, 상관 해석 이전에 — VIF > 5 피처 표시,
-  VIF > 10 시 RidgeCV로 전환 (`data-exploration.md` § 6 / `feature-importance.md`
-  § Pre-Modeling Diagnostics 참조)
-- 결측값이 1% 초과인 피처는 결측 감사 결정 규칙(drop / impute /
-  indicator+impute / remove) 적용 — fitting 전 무음 `dropna()` 절대 금지
 - RCA / 이상 / 결함 조사 질문에서는 회귀 전에 변화점 탐지 실행 — 시간상
   국소 이동에는 전역 피처 순위가 아니라 국소 원인이 필요
   (`root-cause-analysis.md` 참조)
