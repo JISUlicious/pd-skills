@@ -22,9 +22,9 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 
 설치: `uv venv .venv && uv pip install pandas numpy scipy plotly matplotlib seaborn`.
 **Plotly는 기본 시각화 라이브러리**입니다 — 노트북, 웹 앱,
-저장된 HTML 어디서든 인터랙티브 차트가 작동하며, 이해관계자는
-정적 PNG보다 훨씬 더 매력적이라고 느낍니다. matplotlib는 진정한
-출판용 정적 이미지가 필요할 때만 사용하세요.
+저장된 HTML 어디에서든 인터랙티브 차트가 작동하며, 이해관계자는
+인터랙티브 차트를 정적 PNG보다 훨씬 더 매력적이라고 느낍니다.
+정적 이미지가 꼭 필요한 출판용 산출물에 한해 matplotlib를 사용하세요.
 
 **pandas 3.0 호환성 주의사항:**
 - CoW(Copy-on-Write)가 항상 켜짐 — `pd.options.mode.copy_on_write` 설정
@@ -73,16 +73,16 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 ```
 
 **Explore** 단계 완료 후 `data-exploration.md` 끝의 EDA 체크리스트의
-모든 항목을 검증합니다. 미체크 항목이 있으면 사용자에게 보고합니다.
-**VIF / 다중공선성 점검은 Explore 단계의 일부이며 모델링으로 미루는
-단계가 아닙니다** — 통합 감사 절차는 `data-exploration.md` § 6 참조.
+모든 항목을 검증합니다. 확인되지 않은 항목이 있으면 사용자에게
+보고합니다. **VIF / 다중공선성 점검은 Explore 단계의 일부이며 모델링으로
+미루는 단계가 아닙니다** — 통합 감사 절차는 `data-exploration.md` § 6 참조.
 
 ## 모델링 전 진단 (필수)
 
-이 감사들은 **Explore** 중에, 모델링 / 드라이버 분석 / 상관 해석에
-앞서 실행됩니다. 각 항목은 잘못된 결론으로 전파될 수 있는 무음 실패
-유형을 잡아냅니다. **이 중 하나라도 건너뛰는 것이 가장 흔한 EDA 실패
-모드입니다.**
+이 감사들은 **Explore** 단계에서, 모델링 / 드라이버 분석 / 상관 해석에
+앞서 실행합니다. 각 항목은 잘못된 결론으로 이어질 수 있는, 겉으로
+드러나지 않는 실패를 잡아냅니다. **이 중 하나라도 건너뛰는 것이 가장
+흔한 EDA 실패 유형입니다.**
 
 ### 1. 다중공선성 감사 — 세 단계
 
@@ -92,10 +92,10 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 | 혼합 타입 VIF | 범주형 존재 시 | `mixed_type_vif(X, num_cols, cat_cols)` | 소스별 max VIF > 10 심각 |
 | 교차 타입 결합 | 범주형 존재 시 | `cross_type_binding(X, num_cols, cat_cols)` | η² 또는 Cramér's V > 0.5 결합 |
 
-수치형만 사용하는 VIF는 수치형 칼럼과 범주형 칼럼 사이의 결합을 무음으로
-놓칩니다 (예: Ames `Garage Yr Blt` ↔ `Garage Finish` η² = 0.998 — 범주형이
-"None"일 때 수치형은 정의되지 않음). 두 타입이 모두 존재하는 데이터셋에서는
-세 가지를 모두 실행하세요.
+수치형만 사용하는 VIF는 수치형 칼럼과 범주형 칼럼 사이의 결합을
+조용히 놓칩니다 (예: Ames `Garage Yr Blt` ↔ `Garage Finish` η² = 0.998
+— 범주형이 "None"일 때 수치형은 정의되지 않음). 두 타입이 모두
+존재하는 데이터셋에서는 세 가지를 모두 실행하세요.
 
 VIF가 심각하고 후속 메서드가 이를 견딜 수 없을 때, `select_cluster_representative()`
 (우선순위: 집계 → 요약 이름 → 컨텍스트별 점수 → 완전성 → 분산 →
@@ -103,7 +103,7 @@ VIF가 심각하고 후속 메서드가 이를 견딜 수 없을 때, `select_cl
 
 ### 2. 결측 처리 감사 (dtype 인식)
 
-`null_audit(X, y)`를 칼럼별로 실행하세요. **블랭킷 `dropna()`는 절대
+`null_audit(X, y)`를 칼럼별로 실행하세요. **일괄적인 `dropna()`는 절대
 금지**입니다. 감사는 타겟 dtype에 따라 적절한 연관성 측도를 선택합니다:
 수치형은 Spearman ρ, 이진형은 점이연 r, 다클래스는 Cramér's V.
 
@@ -124,26 +124,28 @@ if y.skew() > 1 and (y > 0).all():
     y_model = np.log1p(y)
 ```
 
-원본 타겟과 변환된 타겟의 R²를 모두 보고. 로그 공간 MAE를 이해관계자를
-위해 원본 단위(예: 달러)로 변환. `feature-importance.md` § 1b 참조.
+원본 타겟과 변환된 타겟의 R²를 모두 보고합니다. 로그 공간 MAE는
+이해관계자를 위해 원본 단위(예: 달러)로 환산합니다. `feature-importance.md`
+§ 1b 참조.
 
 ### 4. 동어반복 / 누수 점검
 
-- **등급-요약 동어반복:** 상위 드라이버가 자체로 요약(`OverallQual`,
+- **등급-요약 동어반복:** 상위 드라이버가 그 자체로 요약(`OverallQual`,
   `Score`, `Rating`)이고 구성 요소 등급이 바로 뒤에 있다면, 그것을
-  제외하고 재적합. R²가 거의 떨어지지 않으면 중복 롤업입니다 — 클러스터를
-  보고하고 요약은 보고하지 마세요. (Ames 예: `Overall Qual`을 제거했을 때
-  R²가 *오히려* 0.001 증가 — 구성 요소가 모든 신호를 가졌음.)
-- **결과 이후 누수:** 적합 전에 타겟에서 계산되거나 타겟 이후의 변수는
-  모두 제거 (예: 같은 도구의 `mental_health_index`로 `stress_level`을
-  예측).
+  제외하고 재적합합니다. R²가 거의 떨어지지 않으면 중복 요약일 뿐입니다
+  — 클러스터를 보고하되 요약은 보고하지 마세요. (Ames 예: `Overall Qual`을
+  제거하자 R²가 *오히려* 0.001 증가 — 구성 요소가 모든 신호를 담고
+  있었음.)
+- **결과 이후 누수:** 적합 전에 타겟에서 계산되거나 타겟 이후에
+  발생하는 변수는 모두 제거합니다 (예: 같은 설문 도구의
+  `mental_health_index`로 `stress_level`을 예측).
 
 `feature-importance.md` § 안티패턴 / 누수 참조.
 
 ## pandas 규칙
 
 **항상 해야 할 것:**
-- 객체 타입으로의 무음 폴백을 막기 위해 read 시 `dtype=` 지정
+- 객체 타입으로의 암묵적 폴백을 막기 위해 read 시 `dtype=` 지정
 - `pd.to_datetime(..., errors='coerce')` 사용 후 NaT 확인
 - 체인 인덱싱이 아니라 `.loc[condition, col]` 사용
 - `assign()`, `query()`, `pipe()`로 메서드 체인 구성
@@ -153,8 +155,8 @@ if y.skew() > 1 and (y > 0).all():
 - NaN 가능 칼럼에는 `int64` 대신 `Int64` (nullable) 사용
 - `apply(axis=1)`이나 루프보다 벡터화 연산 선호
 - `df.method(inplace=True)`가 아닌 `df = df.method()` 대입 사용
-- 모든 **모델링 전 4가지 진단**(다중공선성 / 결측 / 왜도 / 동어반복 —
-  위 섹션 참조)을 Explore 중에 실행, 모델링 이전에
+- Explore 단계의 모델링 이전에 **모델링 전 4가지 진단**(다중공선성 /
+  결측 / 왜도 / 동어반복 — 위 섹션 참조)을 모두 실행
 - 선형 분석의 R² < 0.4이거나 순위가 일치하지 않으면, 드라이버 보고 전에
   XGBoost + SHAP로 교차 검증 (`feature-importance.md` 참조)
 - RCA / 이상 / 결함 조사 질문에서는 회귀 전에 변화점 탐지 실행 — 시간상
