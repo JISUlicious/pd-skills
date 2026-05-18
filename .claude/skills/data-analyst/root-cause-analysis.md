@@ -51,6 +51,33 @@ except Exception:
 `scipy` and `sklearn` (already required by `feature-importance.md`) cover
 Fisher's exact, Mann-Whitney, propensity matching, and Tukey HSD.
 
+### Time-indexed data — do not use random `train_test_split`
+
+Most RCA data is time-indexed (per-lot defect rate, per-sensor reading
+sequence). A random split causes **temporal leakage**: training rows
+include moments after test rows, so the model implicitly "sees the
+future." This silently inflates holdout R² / AUC.
+
+```python
+# WRONG for time-indexed data:
+# X_train, X_test = train_test_split(X, test_size=0.2, random_state=42)
+
+# RIGHT — explicit time cutoff:
+cutoff = df["timestamp"].quantile(0.8)
+train = df[df["timestamp"] < cutoff]
+test  = df[df["timestamp"] >= cutoff]
+
+# OR sklearn's TimeSeriesSplit for CV:
+from sklearn.model_selection import TimeSeriesSplit
+tscv = TimeSeriesSplit(n_splits=5)
+for train_idx, test_idx in tscv.split(X.sort_index()):
+    ...
+```
+
+Random split is acceptable only when the rows are exchangeable — typically
+when the analysis question is cross-sectional (compare populations at one
+point in time), not temporal.
+
 ## 1. Change-Point Detection (CPD)
 
 The signature question of an excursion is **when did it start?** Rolling
@@ -98,15 +125,25 @@ CUSUM accumulates deviation and raises an alarm when accumulation crosses
 a threshold:
 
 ```python
-def cusum(series, target=None, k=0.5, h=5):
+def cusum(series, target=None, sigma=None, k=0.5, h=5, ref_window=50):
     """Two-sided CUSUM. Returns indices where +/- CUSUM exceeds h*sigma.
 
-    k : reference value in standard deviations (0.5 = sensitive to 1σ shifts)
-    h : decision threshold in standard deviations (5 is the canonical default)
+    target : reference mean. If None, estimated from the first `ref_window` samples
+             (NOT the full series — that would include any drift you're trying
+             to detect).
+    sigma  : reference standard deviation. If None, estimated from the first
+             `ref_window` samples for the same reason.
+    k      : reference value in standard deviations (0.5 = sensitive to 1σ shifts)
+    h      : decision threshold in standard deviations (5 is canonical)
+
+    Estimating target/sigma from the full series is a common bug: a drifted
+    series has inflated σ, the slack k·σ becomes too generous, and the test
+    under-detects the drift it was supposed to find.
     """
     s = np.asarray(series, dtype=np.float64)
-    target = target if target is not None else s.mean()
-    sigma = s.std()
+    ref = s[:min(ref_window, len(s) // 5)]               # clean-period window
+    target = target if target is not None else ref.mean()
+    sigma  = sigma  if sigma  is not None else ref.std()
     pos = np.zeros(len(s)); neg = np.zeros(len(s))
     for i in range(1, len(s)):
         pos[i] = max(0, pos[i-1] + (s[i] - target - k * sigma))
@@ -198,15 +235,30 @@ def ewma_chart(values, lambda_=0.2, L=3):
 ### Process Capability Indices
 
 ```python
-def capability(values, lsl, usl, k=6):
-    """Cp, Cpk, Pp, Ppk for a measurement vs. spec limits.
-    Cp/Cpk use within-group sigma (rational subgroup); Pp/Ppk use overall sigma.
-    Reports practical interpretation alongside numeric values.
+# Hartley's d2 constants for the R-bar method (subgroup sizes 2..10)
+_D2 = {2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534,
+       7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078}
+
+def capability(values, lsl, usl, subgroup_size=None, k=6):
+    """Cp, Cpk (within-subgroup σ) and Pp, Ppk (overall σ) vs spec limits.
+
+    subgroup_size : if given, estimate σ_within from subgroup ranges via R-bar/d2
+                    (the rational-subgroup method). Otherwise σ_within = σ_overall,
+                    in which case Cp == Pp and the within/long-term comparison
+                    is uninformative.
     """
     s = np.asarray(values, dtype=np.float64)
     sigma_overall = s.std(ddof=1)
-    sigma_within  = sigma_overall                # if no subgroups, same; else compute from R-bar/d2
     mu = s.mean()
+
+    if subgroup_size is not None and subgroup_size in _D2:
+        n_sub = len(s) // subgroup_size
+        sg = s[:n_sub * subgroup_size].reshape(n_sub, subgroup_size)
+        rbar = (sg.max(axis=1) - sg.min(axis=1)).mean()
+        sigma_within = rbar / _D2[subgroup_size]
+    else:
+        sigma_within = sigma_overall                  # falls back; Cp == Pp
+
     cp  = (usl - lsl) / (k * sigma_within)
     cpk = min((usl - mu) / (3 * sigma_within), (mu - lsl) / (3 * sigma_within))
     pp  = (usl - lsl) / (k * sigma_overall)
@@ -218,6 +270,7 @@ def capability(values, lsl, usl, k=6):
         if v < 1.67: return "capable"
         return "highly capable"
     return {"Cp": cp, "Cpk": cpk, "Pp": pp, "Ppk": ppk,
+            "sigma_within": sigma_within, "sigma_overall": sigma_overall,
             "Cpk_interp": interpret(cpk), "Ppk_interp": interpret(ppk)}
 ```
 
@@ -333,12 +386,29 @@ def commonality(df, factor_col, defect_col, defect_value=1, alpha=0.01):
               .reset_index(drop=True))
 
 # Sweep across all categorical factors:
+all_rows = []
 for factor in categorical_cols:
-    sig = commonality(df, factor, "is_defective")
+    sig = commonality(df, factor, "is_defective", alpha=1.0)   # collect raw p-values
     if len(sig):
-        print(f"\n{factor}: {len(sig)} significant levels")
-        print(sig.to_string(index=False))
+        sig["factor"] = factor
+        all_rows.append(sig)
+
+# Apply BH-FDR across the FULL sweep, not per-factor
+if all_rows:
+    from statsmodels.stats.multitest import multipletests
+    full = pd.concat(all_rows, ignore_index=True)
+    full["p_bh_fdr"] = multipletests(full["p_fisher"], method="fdr_bh")[1]
+    print(full.query("p_bh_fdr < 0.05")
+              .sort_values("p_bh_fdr")
+              [["factor", "level", "defect_rate_in_level", "lift", "p_bh_fdr"]]
+              .to_string(index=False))
 ```
+
+**Multiplicity scope warning:** the `p_bonferroni` returned by `commonality()`
+is **within-factor only** (factor's number of levels). For a wide sweep
+across many factors — SECOM with 590 sensor categoricals, for example —
+the right correction is BH-FDR applied to **all p-values across all
+factors** as shown above, not the within-factor Bonferroni.
 
 For multi-factor commonality (which *combination* of tool + recipe + lot
 appears in defects), use frequent-itemset mining:

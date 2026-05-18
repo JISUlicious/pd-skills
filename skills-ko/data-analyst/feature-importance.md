@@ -162,30 +162,50 @@ for cluster in find_clusters(X[numeric_cols]):
 
 회귀를 적합시키기 전, 타겟의 분포를 확인합니다. 강한 우편향(가격, 횟수,
 지속 시간, 매출에서 흔히 나타남)은 OLS β에 대한 꼬리 영역 관측치의
-영향력을 부풀리고, 이분산 잔차를 만듭니다. 해결책은 한 줄입니다:
+영향력을 부풀리고, 이분산 잔차를 만듭니다.
+
+**타겟 유형별 결정 규칙:**
+- 양수만, 우편향(`skew > 1`, `y > 0`) → `log1p` 또는 **Box-Cox**
+  (Box-Cox는 최적 λ를 선택; `log`는 Box-Cox의 λ=0 경우)
+- 카운트(Poisson 형태) → Poisson 회귀 / `XGBRegressor(objective="count:poisson")`
+- [0, 1] 사이의 비율 → logit 변환
+- 좌편향 → Yeo-Johnson (음수도 처리) 또는 제곱 변환
+- 다봉 / 두꺼운 꼬리 분포 → **분위수 회귀** 고려
+  (`XGBRegressor(objective="reg:quantileerror", quantile_alpha=0.5)`로 중앙값)
 
 ```python
-print(f"Target skew: {y.skew():+.2f}")
-if y.skew() > 1 and (y > 0).all():
+from scipy.stats import skew, boxcox
+print(f"Target skew: {skew(y):+.2f}")
+
+if skew(y) > 1 and (y > 0).all():
+    # 기본: log1p. 더 유연하게 하려면 Box-Cox:
+    #   y_model, lam = boxcox(y + 1e-9); print(f"Box-Cox λ = {lam:.3f}")
     print("  → 강한 우편향; 모델링에 log1p(y) 사용")
     y_model = np.log1p(y)
-elif y.skew() < -1:
-    print("  → 강한 좌편향; Box-Cox 또는 제곱 변환을 고려")
-    y_model = y                                  # 사례별로 결정
+elif skew(y) < -1:
+    from sklearn.preprocessing import PowerTransformer
+    pt = PowerTransformer(method="yeo-johnson").fit(y.values.reshape(-1, 1))
+    y_model = pt.transform(y.values.reshape(-1, 1)).ravel()
+    print(f"  → 강한 좌편향; Yeo-Johnson 적용, 새 왜도 {skew(y_model):+.2f}")
 else:
     y_model = y
 
-print(f"Skew after transform: {y_model.skew():+.2f}")
+print(f"Skew after transform: {skew(y_model):+.2f}")
 ```
 
 원본 타겟과 변환된 타겟의 R²를 **둘 다** 보고하여 독자가 예측력 향상을
 확인할 수 있게 하세요. 로그 변환을 적용했다면 모델 오차도 이해관계자를
-위해 원본 단위로 변환합니다:
+위해 **행마다** 원본 단위로 변환합니다 — 단일 곱셈 근사를 쓰지 마세요:
 
 ```python
-mae_log = mean_absolute_error(y_test, pred)
-mae_dollars = y_raw.median() * (np.exp(mae_log) - 1)   # log(y)에 대한 회귀의 경우
-print(f"MAE in log space: {mae_log:.4f}  (~{mae_dollars/y_raw.median():.1%} relative error)")
+# 잘못된 방법 — mae_log가 작을 때만 유효 (Taylor 전개):
+# mae_dollars = y_raw.median() * (np.exp(mae_log) - 1)
+
+# 올바른 방법 — 행별로 예측을 역변환한 뒤 원본 단위로 MAE 계산:
+pred_orig = np.expm1(pred)              # log1p를 사용했다면
+y_orig    = np.expm1(y_test)
+mae_dollars = mean_absolute_error(y_orig, pred_orig)
+print(f"MAE in $: ${mae_dollars:,.0f} (median-priced item: ${y_orig.median():,.0f})")
 ```
 
 ### 2. 모델링을 위한 결측 처리 정책
@@ -232,6 +252,12 @@ print(audit.to_string(index=False))
 `miss_target_assoc`는 수치형 타겟에는 Spearman ρ, 이진형에는 점이연 r,
 다클래스에는 Cramér's V입니다. 세 가지 모두 [-1, 1] / [0, 1] 비교 가능
 척도에 있으므로 아래의 동일한 0.05 임계값이 적용됩니다.
+
+**임계값 주의:** 0.05는 일반적인 n ≈ 1k–100k 환경을 가정한 경험적
+값입니다. n = 1M에서 |assoc| 0.05는 통계적으로 매우 유의하지만 실용적
+효과는 작습니다 — 매우 큰 n에서는 임계값을 ~0.10로 상향 조정하세요.
+n < 200에서는 ~0.20로 (추정치가 노이즈에 민감함). 임계값은 통계적
+유의성이 아닌 **실용적** 유의성을 의도한 것입니다.
 
 **피처별 결정 규칙 (DataFrame 전체가 아니라 칼럼별 적용):**
 
@@ -395,18 +421,18 @@ print(gain.head(15))
 
 ### 2. 순열 중요도 (sklearn — 모델 무관)
 
-더 안전한 기본값. 단일 피처의 값을 무작위로 섞었을 때 홀드아웃 점수가
-얼마나 떨어지는지를 측정합니다.
+모델 무관(model-agnostic) 베이스라인입니다. 단일 피처의 값을 무작위로
+섞었을 때 홀드아웃 점수가 얼마나 떨어지는지를 측정합니다.
 
 ```python
 from sklearn.inspection import permutation_importance
 
 perm = permutation_importance(
     model, X_test, y_test,
-    n_repeats=5,
+    n_repeats=10,                            # 10–30 권장; 5는 너무 노이즈가 큼
     random_state=42,
     n_jobs=-1,
-    scoring="r2",            # 분류는 "roc_auc"
+    scoring="r2",                            # 아래 참고 — 타겟 형태에 따라 선택
 )
 perm_df = (pd.DataFrame({
         "feature": X_test.columns,
@@ -418,9 +444,23 @@ perm_df = (pd.DataFrame({
 print(perm_df.head(15).round(4))
 ```
 
+**타겟 형태별 `scoring=`:**
+- 대칭적 수치형 타겟 → `"r2"` (기본)
+- 두꺼운 꼬리 / 로그 변환된 타겟 → `"neg_mean_absolute_error"`
+  (R²는 긴 꼬리에 지배됨; MAE는 일반적 행의 영향을 반영)
+- 이진 분류, 균형 잡힘 → `"roc_auc"`
+- 이진 분류, 불균형 (양성 < 10%) → `"average_precision"` (PR-AUC)
+
 훈련 데이터가 아니라 **홀드아웃 세트**에서 계산하세요. 훈련 데이터에서는
 순열 중요도가 무의미합니다 (모델이 이미 학습 데이터를 외운 상태이기
 때문).
+
+**상관된 피처에 대한 알려진 편향 (Strobl 2007, Hooker–Mentch 2021):**
+X₁과 X₂가 상관되어 있을 때, X₁을 섞어도 모델이 X₂에서 신호를 회복할 수
+있어서 *둘 다* 약해 보입니다 — 중요도가 클러스터 전체에 분산됩니다. 항상
+§ 1의 VIF / 클러스터 축소 단계와 함께 사용하세요. 그렇지 않으면 상관된
+피처들이 실제 효과와 무관하게 독립 피처보다 일관되게 낮은 순위를
+받습니다.
 
 매우 큰 홀드아웃(> 100k 행)에서는 50k로 서브샘플링해 속도를 확보하세요 —
 순열은 모델을 `n_repeats × n_features`회 실행합니다.
@@ -431,13 +471,27 @@ print(perm_df.head(15).round(4))
 이론적 보장(협력 게임 이론의 Shapley 값)과 함께 제공합니다. 전역(평균
 |SHAP|) 및 행 단위 설명 모두에 사용합니다.
 
+**`feature_perturbation=` 선택이 상관된 피처에서 중요합니다:**
+- `"tree_path_dependent"` (기본) — 관측적 SHAP, 빠름, 배경 데이터 불필요.
+  상관된 피처에서는 클러스터 내 각 피처에 파트너의 효과 일부가 귀속됩니다.
+- `"interventional"` — 인과적/개입적 SHAP, 배경 데이터셋 필요, 더 느림.
+  인과적 해석에 더 깔끔. SHAP을 예측 설명이 아닌 피처 *효과*에 대한
+  논증으로 사용할 때 필수입니다.
+
 ```python
 import shap
 
-# 중요: 큰 데이터에서는 SHAP 전에 샘플링 — 전체 SHAP은 O(n × trees × leaves)
+# 중요: 큰 데이터에서는 SHAP 전에 샘플링 — TreeSHAP은 O(n × trees × leaves²)
 X_shap = X_test.sample(min(50_000, len(X_test)), random_state=42)
 
+# 관측적 SHAP (기본 — 빠름, 예측 설명에 적합)
 explainer = shap.TreeExplainer(model)
+
+# 또는 개입적 SHAP (느림, 효과 해석에 더 깔끔):
+# X_bg = X_train.sample(min(1000, len(X_train)), random_state=42)
+# explainer = shap.TreeExplainer(model, X_bg,
+#                                feature_perturbation="interventional")
+
 shap_values = explainer.shap_values(X_shap)
 # shap_values shape: 회귀/이진의 경우 (n_rows, n_features)
 
@@ -501,11 +555,17 @@ print(agreement)
 ```
 
 해석:
-- **비대각 > 0.8:** 메서드가 일치 → 순위에 높은 신뢰.
+- **비대각 > 0.8:** 메서드 일치 → 순위가 메서드 선택에 강건.
 - **0.5–0.8:** 대부분 일치 → 합의된 상위 K를 보고하고, 불일치 표시.
 - **< 0.5:** 메서드 간 불일치 → 비선형성, 피처 상호작용, 또는 어느 한
   메서드가 잘못된 신호를 잡았다고 의심해야 합니다. 순위를 발표하기
   전에 원인을 조사하세요.
+
+**합의가 알려주는 것과 알려주지 않는 것:** 네 렌즈 사이의 강한 일치는
+**순위**가 메서드 선택에 강건하다는 의미입니다 — 근본적인 관계가
+인과적이라는 의미는 아닙니다. 네 메서드 모두 같은 데이터로 적합한 같은
+모델의 다른 시각이며, 상관된 증인이지 독립적 증인이 아닙니다. 인과를
+주장하려면 `root-cause-analysis.md` § 4 (DAG, DiD, 반박)을 보세요.
 
 ## 상호작용 탐지
 

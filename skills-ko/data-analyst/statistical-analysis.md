@@ -131,21 +131,30 @@ from scipy import stats
 group_a = df.loc[df["variant"] == "A", "revenue"].dropna()
 group_b = df.loc[df["variant"] == "B", "revenue"].dropna()
 
-# T-검정 (정규성 가정)
-t_stat, p_value = stats.ttest_ind(group_a, group_b, equal_var=False)  # Welch
-print(f"T-test: t={t_stat:.3f}, p={p_value:.4f}")
+# Welch t-test — 평균(MEAN) 차이를 검정 (n>30이면 CLT 덕분에 비정규성에 강건)
+t_stat, p_value = stats.ttest_ind(group_a, group_b, equal_var=False)
+print(f"Welch t-test: t={t_stat:.3f}, p={p_value:.4f}  ← 귀무가설: mean(A)==mean(B)")
 
-# Mann-Whitney U (비모수, 더 안전함)
+# Mann-Whitney U — 확률적 우위(P(A > B) == 0.5)를 검정, 평균이 아님
 u_stat, p_value = stats.mannwhitneyu(group_a, group_b, alternative="two-sided")
-print(f"Mann-Whitney: U={u_stat:.0f}, p={p_value:.4f}")
+print(f"Mann-Whitney: U={u_stat:.0f}, p={p_value:.4f}  ← 귀무가설: P(A>B)==0.5")
 
-# 효과 크기 (Cohen's d)
+# 중요: 보고하는 양과 일치하는 검정을 선택하세요.
+# "평균이 +X% 상승"으로 보고한다면 Welch (또는 평균 차이의 부트스트랩) 사용.
+# 중앙값 상승 / 승률을 보고한다면 Mann-Whitney 사용.
+# 평균 상승을 보고하면서 Mann-Whitney로 검정하는 것 — 흔한 함정입니다.
+
+# 효과 크기 (Cohen's d, 표본 크기가 다를 때도 올바른 풀링)
 def cohens_d(a, b):
-    pooled_std = np.sqrt((a.std()**2 + b.std()**2) / 2)
-    return (a.mean() - b.mean()) / pooled_std
+    n_a, n_b = len(a), len(b)
+    s_a, s_b = a.std(ddof=1), b.std(ddof=1)
+    pooled_var = ((n_a - 1) * s_a**2 + (n_b - 1) * s_b**2) / (n_a + n_b - 2)
+    return (a.mean() - b.mean()) / np.sqrt(pooled_var)
 
 d = cohens_d(group_b, group_a)
-print(f"Cohen's d: {d:.3f}")  # 0.2=작음, 0.5=중간, 0.8=큼
+print(f"Cohen's d: {d:.3f}")  # 거친 경험칙: 0.2 작음, 0.5 중간, 0.8 큼
+# 효과 크기 임계값은 도메인 의존적입니다. 마케팅에서 d=0.2는 엄청나지만
+# 심리학에서는 보통 수준입니다. p-값과 함께 d도 보고하고, 맥락에서 해석하세요.
 ```
 
 ### 카이제곱 검정 (범주형 vs 범주형)
@@ -212,31 +221,49 @@ print(f"\nCategoricals with no significant effect on any numeric: {uninformative
 ## A/B 테스트 분석
 
 ```python
-def ab_test_report(df, variant_col, metric_col, control="A", treatment="B"):
-    ctrl  = df.loc[df[variant_col] == control,   metric_col].dropna()
-    treat = df.loc[df[variant_col] == treatment, metric_col].dropna()
+def ab_test_report(df, variant_col, metric_col, control="A", treatment="B",
+                   n_boot=10_000, seed=42):
+    """A/B 테스트 보고서. 평균(MEAN)의 차이를 검정합니다 (lift 수치와 일치).
+
+    Welch t-test로 추론, 부트스트랩으로 CI 계산, Mann-Whitney는 확률적 우위에
+    대한 보조 점검으로 사용합니다.
+    """
+    ctrl  = df.loc[df[variant_col] == control,   metric_col].dropna().to_numpy()
+    treat = df.loc[df[variant_col] == treatment, metric_col].dropna().to_numpy()
 
     # 요약
-    print(f"Control   n={len(ctrl):,}  mean={ctrl.mean():.4f}  median={ctrl.median():.4f}")
-    print(f"Treatment n={len(treat):,}  mean={treat.mean():.4f}  median={treat.median():.4f}")
+    print(f"Control   n={len(ctrl):,}  mean={ctrl.mean():.4f}  median={np.median(ctrl):.4f}")
+    print(f"Treatment n={len(treat):,}  mean={treat.mean():.4f}  median={np.median(treat):.4f}")
     lift = (treat.mean() - ctrl.mean()) / ctrl.mean()
-    print(f"Relative lift: {lift:+.2%}")
+    print(f"평균 기준 상대 상승률: {lift:+.2%}")
 
-    # 통계 검정
-    _, p = stats.mannwhitneyu(ctrl, treat, alternative="two-sided")
-    print(f"p-value (Mann-Whitney): {p:.4f} {'✓ SIGNIFICANT' if p < 0.05 else '✗ not significant'}")
+    # 주된 추론 — 평균(MEAN)에 대한 Welch t-test (보고된 lift와 일치)
+    t_stat, p_welch = stats.ttest_ind(treat, ctrl, equal_var=False)
+    print(f"Welch t-test p={p_welch:.4f} {'✓ SIGNIFICANT' if p_welch < 0.05 else '✗ not significant'}")
 
-    # 평균 차이에 대한 95% 신뢰구간 (부트스트랩)
-    n_boot = 10_000
-    diffs = np.array([
-        np.random.choice(treat, len(treat)).mean() - np.random.choice(ctrl, len(ctrl)).mean()
-        for _ in range(n_boot)
-    ])
+    # 평균 차이의 95% 부트스트랩 CI (재현 가능)
+    rng = np.random.default_rng(seed)
+    diffs = np.empty(n_boot)
+    for i in range(n_boot):
+        diffs[i] = (rng.choice(treat, len(treat), replace=True).mean()
+                  - rng.choice(ctrl,  len(ctrl),  replace=True).mean())
     lo, hi = np.percentile(diffs, [2.5, 97.5])
-    print(f"95% CI for mean diff: [{lo:.4f}, {hi:.4f}]")
+    print(f"평균 차이의 95% 부트스트랩 CI: [{lo:+.4f}, {hi:+.4f}]")
+
+    # 보조 — 확률적 우위에 대한 Mann-Whitney (다른 귀무가설)
+    _, p_mw = stats.mannwhitneyu(treat, ctrl, alternative="two-sided")
+    print(f"Mann-Whitney (P(treat>ctrl)==0.5) p={p_mw:.4f}")
+    if (p_welch < 0.05) != (p_mw < 0.05):
+        print("  ⚠ Welch와 Mann-Whitney의 결론이 다릅니다 — 지표 분포가 평균과")
+        print("    순위에서 다르게 이동했습니다. 어느 쪽이 중요한지 조사하세요.")
 
 ab_test_report(df, "variant", "revenue_per_user")
 ```
+
+**다중 검정 경고:** 동일 데이터에 여러 A/B 테스트를 실행하는 경우(지표 ×
+세그먼트 × 코호트), 검정 하나당 5% α는 유지되지 않습니다.
+`statsmodels.stats.multitest.multipletests`로 전체 테스트 패밀리에 BH-FDR을
+적용하거나, 주된 가설을 사전 등록하고 α-소비(α-spending)를 계획하세요.
 
 ## 코호트 분석
 

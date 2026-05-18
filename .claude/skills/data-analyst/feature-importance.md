@@ -166,30 +166,51 @@ distinct signal — don't drop, switch to RidgeCV instead.
 Before fitting a regression, check the target's distribution. Heavy
 right-skew (common for prices, counts, durations, revenues) inflates
 the influence of high-tail observations on OLS β and produces
-heteroscedastic residuals. The fix is one line:
+heteroscedastic residuals.
+
+**Decision rule by target type:**
+- Positive-only, right-skewed (`skew > 1`, `y > 0`) → `log1p` or **Box-Cox**
+  (Box-Cox picks the best λ; `log` is Box-Cox at λ=0)
+- Counts (Poisson-like) → Poisson regression / `XGBRegressor(objective="count:poisson")`
+- Bounded proportions in [0, 1] → logit-transform
+- Left-skewed → Yeo-Johnson (handles negative values too) or square transform
+- Multimodal / fat-tailed → consider **quantile regression**
+  (`XGBRegressor(objective="reg:quantileerror", quantile_alpha=0.5)`) for the median
 
 ```python
-print(f"Target skew: {y.skew():+.2f}")
-if y.skew() > 1 and (y > 0).all():
+from scipy.stats import skew, boxcox
+print(f"Target skew: {skew(y):+.2f}")
+
+if skew(y) > 1 and (y > 0).all():
+    # Default: log1p. For more flexibility, use Box-Cox:
+    #   y_model, lam = boxcox(y + 1e-9); print(f"Box-Cox λ = {lam:.3f}")
     print("  → heavy right-skew; using log1p(y) for modeling")
     y_model = np.log1p(y)
-elif y.skew() < -1:
-    print("  → heavy left-skew; consider Box-Cox or square transform")
-    y_model = y                                  # decide case-by-case
+elif skew(y) < -1:
+    from sklearn.preprocessing import PowerTransformer
+    pt = PowerTransformer(method="yeo-johnson").fit(y.values.reshape(-1, 1))
+    y_model = pt.transform(y.values.reshape(-1, 1)).ravel()
+    print(f"  → heavy left-skew; Yeo-Johnson applied, new skew {skew(y_model):+.2f}")
 else:
     y_model = y
 
-print(f"Skew after transform: {y_model.skew():+.2f}")
+print(f"Skew after transform: {skew(y_model):+.2f}")
 ```
 
 Always report **both** raw-target and transformed-target R² so the
-reader can see the predictive gain. When you log-transform, also
-translate model errors back to original units for stakeholders:
+reader can see the predictive gain. When you log-transform, translate
+model errors **back per-row** for stakeholders — do not use a single
+multiplicative-error approximation:
 
 ```python
-mae_log = mean_absolute_error(y_test, pred)
-mae_dollars = y_raw.median() * (np.exp(mae_log) - 1)   # for regression on log(y)
-print(f"MAE in log space: {mae_log:.4f}  (~{mae_dollars/y_raw.median():.1%} relative error)")
+# WRONG — only valid for small mae_log (Taylor expansion):
+# mae_dollars = y_raw.median() * (np.exp(mae_log) - 1)
+
+# RIGHT — back-transform predictions per row, then compute MAE in original units:
+pred_orig = np.expm1(pred)              # if you used log1p
+y_orig    = np.expm1(y_test)
+mae_dollars = mean_absolute_error(y_orig, pred_orig)
+print(f"MAE in $: ${mae_dollars:,.0f} (median-priced item: ${y_orig.median():,.0f})")
 ```
 
 ### 2. Null-handling policy for modeling
@@ -236,6 +257,13 @@ print(audit.to_string(index=False))
 `miss_target_assoc` is Spearman ρ for numeric targets, point-biserial r
 for binary, and Cramér's V for multiclass. All three live on a comparable
 [-1, 1] / [0, 1] scale, so the same 0.05 threshold below applies.
+
+**Threshold note:** 0.05 is a heuristic chosen for typical n ≈ 1k–100k.
+At n = 1M, |assoc| of 0.05 is highly significant statistically but the
+practical effect is small — consider raising the threshold to ~0.10 for
+very large n. At n < 200, raise to ~0.20 (the estimate is noisy). The
+threshold encodes **practical** significance, not statistical
+significance.
 
 **Decision rules per feature (apply per column, not whole DataFrame):**
 
@@ -398,18 +426,18 @@ feature is the true driver. **Never report gain in isolation.**
 
 ### 2. Permutation importance (sklearn — model-agnostic)
 
-The safer default. Measures the drop in holdout score when a single
-feature's values are randomly shuffled.
+A model-agnostic baseline. Measures the drop in holdout score when a
+single feature's values are randomly shuffled.
 
 ```python
 from sklearn.inspection import permutation_importance
 
 perm = permutation_importance(
     model, X_test, y_test,
-    n_repeats=5,
+    n_repeats=10,                            # 10–30 recommended; 5 is too noisy
     random_state=42,
     n_jobs=-1,
-    scoring="r2",            # or "roc_auc" for classification
+    scoring="r2",                            # see below — pick by target shape
 )
 perm_df = (pd.DataFrame({
         "feature": X_test.columns,
@@ -421,8 +449,22 @@ perm_df = (pd.DataFrame({
 print(perm_df.head(15).round(4))
 ```
 
+**`scoring=` by target shape:**
+- Symmetric numeric target → `"r2"` (default)
+- Heavy-tailed / log-transformed target → `"neg_mean_absolute_error"`
+  (R² is dominated by the long tail; MAE represents the typical row)
+- Binary classification, balanced → `"roc_auc"`
+- Binary classification, imbalanced (positive < 10%) → `"average_precision"` (PR-AUC)
+
 Compute on the **holdout set**, not training data. On training data,
 permutation importance is meaningless (the model has memorized).
+
+**Known bias with correlated features (Strobl 2007, Hooker–Mentch 2021):**
+when X₁ and X₂ are correlated, permuting X₁ leaves the model able to recover
+the signal from X₂, so *both* look weak — importance gets diluted across
+the cluster. Always pair permutation with the VIF / cluster-collapse step
+from § 1; otherwise correlated features systematically rank below their
+independent peers regardless of true effect.
 
 For very large holdouts (> 100k rows), subsample to 50k for speed —
 permutation runs the model `n_repeats × n_features` times.
@@ -434,13 +476,28 @@ individual prediction, with theoretical guarantees (Shapley values from
 cooperative game theory). Use for both global (mean |SHAP|) and per-row
 explanations.
 
+**`feature_perturbation=` choice matters for correlated features:**
+- `"tree_path_dependent"` (default) — observational SHAP, fast, no
+  background needed. With correlated features, attributes some of the
+  partner's effect to each feature in a cluster.
+- `"interventional"` — causal/interventional SHAP, requires a background
+  dataset, slower. Cleaner for causal interpretation. Required when
+  using SHAP to argue about feature *effects* rather than predictions.
+
 ```python
 import shap
 
-# CRITICAL: sample before SHAP on large data — full SHAP is O(n × trees × leaves)
+# CRITICAL: sample before SHAP on large data — TreeSHAP is O(n × trees × leaves²)
 X_shap = X_test.sample(min(50_000, len(X_test)), random_state=42)
 
+# Observational SHAP (default — fast, fine for prediction explanation)
 explainer = shap.TreeExplainer(model)
+
+# OR interventional SHAP (slower, cleaner for effect interpretation):
+# X_bg = X_train.sample(min(1000, len(X_train)), random_state=42)
+# explainer = shap.TreeExplainer(model, X_bg,
+#                                feature_perturbation="interventional")
+
 shap_values = explainer.shap_values(X_shap)
 # shap_values shape: (n_rows, n_features) for regression / binary
 
@@ -504,10 +561,17 @@ print(agreement)
 ```
 
 Interpretation:
-- **Off-diagonal > 0.8:** methods agree → high confidence in the ranking.
+- **Off-diagonal > 0.8:** methods agree → ranking is robust to method choice.
 - **0.5–0.8:** mostly agree → report the consensus top-K, flag disagreements.
 - **< 0.5:** methods disagree → suspect non-linearity, feature interaction,
   or one of the methods is misled. Investigate before publishing a ranking.
+
+**What consensus does and doesn't tell you:** strong agreement across the
+four lenses means the **ranking** is robust to method choice — not that
+the underlying relationship is causal. All four methods are different
+views of the same fitted model on the same data; they are correlated
+witnesses, not independent. To claim causation, see
+`root-cause-analysis.md` § 4 (DAG, DiD, refutation).
 
 ## Interaction Detection
 

@@ -49,6 +49,32 @@ except Exception:
 `scipy`와 `sklearn`(`feature-importance.md`에서 이미 필요)이 Fisher
 정확검정, Mann-Whitney, 성향 점수 매칭, Tukey HSD를 모두 다룹니다.
 
+### 시간 인덱스 데이터 — 무작위 `train_test_split` 사용 금지
+
+대부분의 RCA 데이터는 시간 인덱스 데이터입니다 (로트별 결함률, 센서별
+측정값 시퀀스). 무작위 분할은 **시간적 누수**를 발생시킵니다: 훈련 행에
+테스트 행 이후의 시점이 포함되어 모델이 암묵적으로 "미래를 봅니다." 이는
+홀드아웃 R² / AUC를 조용히 부풀립니다.
+
+```python
+# 시간 인덱스 데이터에서는 잘못된 방법:
+# X_train, X_test = train_test_split(X, test_size=0.2, random_state=42)
+
+# 올바른 방법 — 명시적 시간 컷오프:
+cutoff = df["timestamp"].quantile(0.8)
+train = df[df["timestamp"] < cutoff]
+test  = df[df["timestamp"] >= cutoff]
+
+# 또는 CV에는 sklearn의 TimeSeriesSplit:
+from sklearn.model_selection import TimeSeriesSplit
+tscv = TimeSeriesSplit(n_splits=5)
+for train_idx, test_idx in tscv.split(X.sort_index()):
+    ...
+```
+
+무작위 분할은 행이 교환 가능할 때 — 일반적으로 분석 질문이 단면적(한
+시점에서 모집단 비교)이고 시간적이지 않을 때 — 만 허용됩니다.
+
 ## 1. 변화점 탐지 (CPD)
 
 이상(excursion)의 대표 질문은 **언제 시작되었는가?**입니다. 이동 평균은
@@ -95,15 +121,23 @@ PELT는 종종 미묘한 드리프트(0.5σ 이동이 200 샘플 동안 지속)�
 CUSUM은 편차를 누적하여 누적치가 임계값을 넘으면 알람을 발생시킵니다:
 
 ```python
-def cusum(series, target=None, k=0.5, h=5):
+def cusum(series, target=None, sigma=None, k=0.5, h=5, ref_window=50):
     """양방향 CUSUM. +/- CUSUM이 h*sigma를 초과하는 인덱스를 반환.
 
-    k : 표준편차 단위의 기준값 (0.5 = 1σ 이동에 민감)
-    h : 표준편차 단위의 결정 임계값 (5가 정통적인 기본값)
+    target : 기준 평균. None이면 처음 `ref_window` 샘플에서 추정 (전체 시리즈
+             아님 — 그러면 탐지하려는 드리프트가 포함됨).
+    sigma  : 기준 표준편차. None이면 같은 이유로 처음 `ref_window` 샘플에서 추정.
+    k      : 표준편차 단위의 기준값 (0.5 = 1σ 이동에 민감)
+    h      : 표준편차 단위의 결정 임계값 (5가 정통적인 기본값)
+
+    target/sigma를 전체 시리즈에서 추정하는 것은 흔한 버그입니다: 드리프트된
+    시리즈는 σ가 부풀려지고, 슬랙 k·σ가 너무 관대해져, 탐지하려던 드리프트를
+    오히려 놓칩니다.
     """
     s = np.asarray(series, dtype=np.float64)
-    target = target if target is not None else s.mean()
-    sigma = s.std()
+    ref = s[:min(ref_window, len(s) // 5)]               # 클린 기간 윈도우
+    target = target if target is not None else ref.mean()
+    sigma  = sigma  if sigma  is not None else ref.std()
     pos = np.zeros(len(s)); neg = np.zeros(len(s))
     for i in range(1, len(s)):
         pos[i] = max(0, pos[i-1] + (s[i] - target - k * sigma))
@@ -195,15 +229,29 @@ def ewma_chart(values, lambda_=0.2, L=3):
 ### 공정 능력 지수
 
 ```python
-def capability(values, lsl, usl, k=6):
-    """규격한계 대비 측정값의 Cp, Cpk, Pp, Ppk.
-    Cp/Cpk는 부분군 내 시그마(합리적 부분군) 사용; Pp/Ppk는 전체 시그마 사용.
-    수치 값과 함께 실용적 해석을 보고합니다.
+# R-bar 방법용 Hartley's d2 상수 (부분군 크기 2..10)
+_D2 = {2: 1.128, 3: 1.693, 4: 2.059, 5: 2.326, 6: 2.534,
+       7: 2.704, 8: 2.847, 9: 2.970, 10: 3.078}
+
+def capability(values, lsl, usl, subgroup_size=None, k=6):
+    """규격한계 대비 Cp, Cpk (부분군 내 σ) 및 Pp, Ppk (전체 σ).
+
+    subgroup_size : 주어지면 부분군 범위로부터 R-bar/d2 방식 (합리적 부분군 방법)
+                    으로 σ_within을 추정합니다. 그렇지 않으면 σ_within = σ_overall이
+                    되어 Cp == Pp가 되고, within/long-term 비교는 의미를 잃습니다.
     """
     s = np.asarray(values, dtype=np.float64)
     sigma_overall = s.std(ddof=1)
-    sigma_within  = sigma_overall                # 부분군 없으면 동일; 있으면 R-bar/d2로 계산
     mu = s.mean()
+
+    if subgroup_size is not None and subgroup_size in _D2:
+        n_sub = len(s) // subgroup_size
+        sg = s[:n_sub * subgroup_size].reshape(n_sub, subgroup_size)
+        rbar = (sg.max(axis=1) - sg.min(axis=1)).mean()
+        sigma_within = rbar / _D2[subgroup_size]
+    else:
+        sigma_within = sigma_overall                  # 폴백; Cp == Pp
+
     cp  = (usl - lsl) / (k * sigma_within)
     cpk = min((usl - mu) / (3 * sigma_within), (mu - lsl) / (3 * sigma_within))
     pp  = (usl - lsl) / (k * sigma_overall)
@@ -215,6 +263,7 @@ def capability(values, lsl, usl, k=6):
         if v < 1.67: return "capable"
         return "highly capable"
     return {"Cp": cp, "Cpk": cpk, "Pp": pp, "Ppk": ppk,
+            "sigma_within": sigma_within, "sigma_overall": sigma_overall,
             "Cpk_interp": interpret(cpk), "Ppk_interp": interpret(ppk)}
 ```
 
@@ -329,12 +378,29 @@ def commonality(df, factor_col, defect_col, defect_value=1, alpha=0.01):
               .reset_index(drop=True))
 
 # 모든 범주형 요인 스윕:
+all_rows = []
 for factor in categorical_cols:
-    sig = commonality(df, factor, "is_defective")
+    sig = commonality(df, factor, "is_defective", alpha=1.0)   # 원본 p-값 수집
     if len(sig):
-        print(f"\n{factor}: {len(sig)} significant levels")
-        print(sig.to_string(index=False))
+        sig["factor"] = factor
+        all_rows.append(sig)
+
+# 요인별이 아니라 **전체 스윕**에 걸쳐 BH-FDR 적용
+if all_rows:
+    from statsmodels.stats.multitest import multipletests
+    full = pd.concat(all_rows, ignore_index=True)
+    full["p_bh_fdr"] = multipletests(full["p_fisher"], method="fdr_bh")[1]
+    print(full.query("p_bh_fdr < 0.05")
+              .sort_values("p_bh_fdr")
+              [["factor", "level", "defect_rate_in_level", "lift", "p_bh_fdr"]]
+              .to_string(index=False))
 ```
+
+**다중성 범위 경고:** `commonality()`가 반환하는 `p_bonferroni`는 해당
+요인 **내부**(요인의 수준 수)에만 적용된 것입니다. 여러 요인에 걸친 폭넓은
+스윕(예: SECOM의 590개 센서 범주형)에서 올바른 보정은 위와 같이 **모든
+요인의 모든 p-값에 걸쳐** BH-FDR을 적용하는 것이며, 요인 내 Bonferroni가
+아닙니다.
 
 다중 요인 공통성(어떤 *조합* — 장비 + 레시피 + 로트 — 이 불량에
 나타나는가)에는 빈발 항목집합 마이닝을 사용합니다:

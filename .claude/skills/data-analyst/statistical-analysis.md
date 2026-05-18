@@ -131,21 +131,30 @@ from scipy import stats
 group_a = df.loc[df["variant"] == "A", "revenue"].dropna()
 group_b = df.loc[df["variant"] == "B", "revenue"].dropna()
 
-# T-test (assumes normality)
-t_stat, p_value = stats.ttest_ind(group_a, group_b, equal_var=False)  # Welch
-print(f"T-test: t={t_stat:.3f}, p={p_value:.4f}")
+# Welch t-test — tests difference in MEANS (robust to non-normality at n>30 via CLT)
+t_stat, p_value = stats.ttest_ind(group_a, group_b, equal_var=False)
+print(f"Welch t-test: t={t_stat:.3f}, p={p_value:.4f}  ← null: mean(A)==mean(B)")
 
-# Mann-Whitney U (non-parametric, safer)
+# Mann-Whitney U — tests STOCHASTIC DOMINANCE (P(A > B) == 0.5), not means
 u_stat, p_value = stats.mannwhitneyu(group_a, group_b, alternative="two-sided")
-print(f"Mann-Whitney: U={u_stat:.0f}, p={p_value:.4f}")
+print(f"Mann-Whitney: U={u_stat:.0f}, p={p_value:.4f}  ← null: P(A>B)==0.5")
 
-# Effect size (Cohen's d)
+# IMPORTANT: pick the test that matches the quantity you report.
+# If you report "+X% lift on the mean", use Welch (or bootstrap on means).
+# If you report a median lift / win rate, use Mann-Whitney.
+# Mixing — reporting mean lift but testing Mann-Whitney — is a foot-gun.
+
+# Effect size (Cohen's d, properly pooled for unequal sample sizes)
 def cohens_d(a, b):
-    pooled_std = np.sqrt((a.std()**2 + b.std()**2) / 2)
-    return (a.mean() - b.mean()) / pooled_std
+    n_a, n_b = len(a), len(b)
+    s_a, s_b = a.std(ddof=1), b.std(ddof=1)
+    pooled_var = ((n_a - 1) * s_a**2 + (n_b - 1) * s_b**2) / (n_a + n_b - 2)
+    return (a.mean() - b.mean()) / np.sqrt(pooled_var)
 
 d = cohens_d(group_b, group_a)
-print(f"Cohen's d: {d:.3f}")  # 0.2=small, 0.5=medium, 0.8=large
+print(f"Cohen's d: {d:.3f}")  # rough rules of thumb: 0.2 small, 0.5 medium, 0.8 large
+# Effect-size thresholds are domain-dependent. d=0.2 is huge in marketing,
+# modest in psychology. Report d alongside p-value; interpret in context.
 ```
 
 ### Chi-Square Test (categorical vs categorical)
@@ -213,31 +222,49 @@ print(f"\nCategoricals with no significant effect on any numeric: {uninformative
 ## A/B Test Analysis
 
 ```python
-def ab_test_report(df, variant_col, metric_col, control="A", treatment="B"):
-    ctrl  = df.loc[df[variant_col] == control,   metric_col].dropna()
-    treat = df.loc[df[variant_col] == treatment, metric_col].dropna()
+def ab_test_report(df, variant_col, metric_col, control="A", treatment="B",
+                   n_boot=10_000, seed=42):
+    """A/B test report. Tests difference in MEANS (matches the lift number).
+
+    Returns Welch t-test for inference, bootstrap CI for uncertainty,
+    Mann-Whitney as a supplementary check on stochastic dominance.
+    """
+    ctrl  = df.loc[df[variant_col] == control,   metric_col].dropna().to_numpy()
+    treat = df.loc[df[variant_col] == treatment, metric_col].dropna().to_numpy()
 
     # Summary
-    print(f"Control   n={len(ctrl):,}  mean={ctrl.mean():.4f}  median={ctrl.median():.4f}")
-    print(f"Treatment n={len(treat):,}  mean={treat.mean():.4f}  median={treat.median():.4f}")
+    print(f"Control   n={len(ctrl):,}  mean={ctrl.mean():.4f}  median={np.median(ctrl):.4f}")
+    print(f"Treatment n={len(treat):,}  mean={treat.mean():.4f}  median={np.median(treat):.4f}")
     lift = (treat.mean() - ctrl.mean()) / ctrl.mean()
-    print(f"Relative lift: {lift:+.2%}")
+    print(f"Relative lift on mean: {lift:+.2%}")
 
-    # Statistical test
-    _, p = stats.mannwhitneyu(ctrl, treat, alternative="two-sided")
-    print(f"p-value (Mann-Whitney): {p:.4f} {'✓ SIGNIFICANT' if p < 0.05 else '✗ not significant'}")
+    # Primary inference — Welch t-test on MEANS (matches the lift reported)
+    t_stat, p_welch = stats.ttest_ind(treat, ctrl, equal_var=False)
+    print(f"Welch t-test p={p_welch:.4f} {'✓ SIGNIFICANT' if p_welch < 0.05 else '✗ not significant'}")
 
-    # 95% CI for difference in means (bootstrap)
-    n_boot = 10_000
-    diffs = np.array([
-        np.random.choice(treat, len(treat)).mean() - np.random.choice(ctrl, len(ctrl)).mean()
-        for _ in range(n_boot)
-    ])
+    # Bootstrap 95% CI for difference in means (reproducible)
+    rng = np.random.default_rng(seed)
+    diffs = np.empty(n_boot)
+    for i in range(n_boot):
+        diffs[i] = (rng.choice(treat, len(treat), replace=True).mean()
+                  - rng.choice(ctrl,  len(ctrl),  replace=True).mean())
     lo, hi = np.percentile(diffs, [2.5, 97.5])
-    print(f"95% CI for mean diff: [{lo:.4f}, {hi:.4f}]")
+    print(f"95% bootstrap CI for mean diff: [{lo:+.4f}, {hi:+.4f}]")
+
+    # Supplementary — Mann-Whitney on stochastic dominance (different null)
+    _, p_mw = stats.mannwhitneyu(treat, ctrl, alternative="two-sided")
+    print(f"Mann-Whitney (P(treat>ctrl)==0.5) p={p_mw:.4f}")
+    if (p_welch < 0.05) != (p_mw < 0.05):
+        print("  ⚠ Welch and Mann-Whitney disagree — the metric distribution shifts")
+        print("    differently in mean vs. in rank. Investigate which matters.")
 
 ab_test_report(df, "variant", "revenue_per_user")
 ```
+
+**Multiplicity warning:** if you run multiple A/B tests on the same data
+(metric × segment × cohort), the per-test 5% alpha doesn't hold. Apply BH-FDR
+across the full test family via `statsmodels.stats.multitest.multipletests`,
+or pre-register the primary hypothesis and budget α-spending.
 
 ## Cohort Analysis
 
