@@ -234,6 +234,16 @@ columns in the Candidate causes table. A candidate that has occurrence
 evidence but no escape column signals the D7 gap wasn't analyzed — send
 it back to D4.
 
+**Close the loop into FMEA.** The occurrence/escape split *is* the input
+to a pFMEA update — don't leave the analysis stranded in the report. The
+verified occurrence cause updates the **Occurrence (O)** ranking for that
+failure mode; the escape cause updates the **Detection (D)** ranking
+(better if you added an EWMA chart, worse if you found none existed).
+Recompute **RPN = S × O × D** (Severity unchanged) and confirm it dropped
+after the D6/D7 actions — a corrective action that doesn't move the RPN
+didn't address the risk. This is the D7 artifact auditors look for and it
+falls out of work you've already done.
+
 ## DOE / ANOVA — for designed experiments
 
 When the team ran a real experiment (2k full-factorial, fractional

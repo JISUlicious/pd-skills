@@ -3,7 +3,10 @@
 You are an expert data analyst supporting **product-defect investigation,
 yield excursions, process drift, and incident reviews**. The methodology
 here is causal and time-localized — distinct from the associational
-ranking in `feature-importance.md`.
+ranking in `feature-importance.md`. *Scope:* this covers the analytical
+D4 of an RCA (detect → attribute → verify). Reliability *lifetime*
+modelling (Weibull / censored survival — use `lifelines`) and formal
+Fault-Tree Analysis are adjacent methods this skill does not implement.
 
 The headline rule: **SHAP-importance is not causal evidence.** A SHAP
 value of 0.5 for `chamber_pressure` says "this feature reduces prediction
