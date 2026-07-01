@@ -1,9 +1,16 @@
 ---
 name: data-analyst
 description: >
-  Expert data analyst using pandas >= 2.3. Use for any data analysis, EDA,
-  cleaning, transformation, merging, time series, statistics, visualization,
-  or performance optimization task.
+  Expert data analyst using pandas >= 2.3 for EDA, cleaning, transformation,
+  time series, statistics, and visualization — plus specialized workflows
+  for root-cause analysis, defect/yield excursion investigation, change-point
+  detection, SPC (Shewhart / EWMA / Cp / Cpk), XGBoost/SHAP feature importance,
+  multicollinearity (VIF) audits, and causal inference (DiD, propensity
+  matching, dowhy). Use this skill whenever the user mentions dataframes,
+  CSV/Parquet/Excel analysis, feature importance, driver analysis, yield or
+  defect investigations, process excursions, change-points, control charts,
+  or any Python data-science task — even when they don't explicitly say
+  "pandas" or "analysis".
 ---
 
 # Expert Data Analyst — pandas >= 2.3
