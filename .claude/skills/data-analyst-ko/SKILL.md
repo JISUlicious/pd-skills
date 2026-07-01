@@ -59,6 +59,9 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 | RCA 프레임워크 + 변화점(PELT/CUSUM) + SPC(Shewhart/EWMA/Cp/Cpk) + 의사결정 치트시트 + 안티패턴 | `root-cause-analysis.md` |
 | RCA 공통성 — Fisher / BH-FDR / 클러스터 축소 / 빈발 항목집합 | `rca-commonality.md` |
 | RCA 인과 추론 — DAG / DiD / 성향 / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
+| RCA 정성적 — 파레토(80/20), 어골도(6M), 5-Why + 반증 | `rca-qualitative.md` |
+| RCA D5 검증 — 수정이 작동했는가 (검정력 / pre-post / 규칙 안정성) | `rca-d5-verification.md` |
+| RCA 웨이퍼 맵 / 공간적 결함 패턴 (KDE, Ripley의 K, 분류) | `rca-wafer-spatial.md` |
 | RCA 보고 — Tier 2 템플릿 + 양식 가이드 + 자체 완결적 HTML 출력 | `rca-reporting.md` |
 
 ### 작업별 파일 로딩
@@ -71,6 +74,9 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 **RCA — 변화점 / SPC / 안티패턴 / 종단 간 워크플로**: `root-cause-analysis.md`
 **RCA 공통성 (어떤 센서 / 요인이 이동했는가)**: `root-cause-analysis.md`, `rca-commonality.md`
 **RCA 인과 분석 또는 DOE**: `rca-causal-analysis.md`
+**RCA 정성적 (파레토 / 어골도 / 5-Why)**: `rca-qualitative.md`
+**RCA D5 검증 (수정이 작동했는가)**: `rca-d5-verification.md`
+**RCA 웨이퍼 맵 / 공간적 결함 패턴**: `rca-wafer-spatial.md`
 **RCA 보고서 작성 (Tier 2 마크다운 또는 HTML)**: `rca-reporting.md`
 **성능 이슈**: `performance-optimization.md`, `data-loading.md`
 

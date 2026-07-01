@@ -61,6 +61,9 @@ quality static output.
 | RCA framework + change-point (PELT/CUSUM) + SPC (Shewhart/EWMA/Cp/Cpk) + decision cheatsheet + anti-patterns | `root-cause-analysis.md` |
 | RCA commonality — Fisher / BH-FDR / cluster collapse / frequent-itemset | `rca-commonality.md` |
 | RCA causal inference — DAG / DiD / propensity / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
+| RCA qualitative — Pareto (80/20), Fishbone (6M), 5-Why + falsification | `rca-qualitative.md` |
+| RCA D5 verification — did the fix work (power / pre-post / rule stability) | `rca-d5-verification.md` |
+| RCA wafer-map / spatial defect patterns (KDE, Ripley's K, taxonomy) | `rca-wafer-spatial.md` |
 | RCA reporting — Tier 2 template + form guide + self-contained HTML output | `rca-reporting.md` |
 
 ### Task-Specific File Loading
@@ -73,6 +76,9 @@ For **feature importance / non-linear drivers**: read `feature-importance.md`, `
 For **RCA — change-point / SPC / anti-patterns / end-to-end workflow**: read `root-cause-analysis.md`
 For **RCA commonality (which sensors / factors shifted)**: read `root-cause-analysis.md`, `rca-commonality.md`
 For **RCA causal analysis or DOE**: read `rca-causal-analysis.md`
+For **RCA qualitative (Pareto / Fishbone / 5-Why)**: read `rca-qualitative.md`
+For **RCA D5 verification (did the fix work)**: read `rca-d5-verification.md`
+For **RCA wafer-map / spatial defect patterns**: read `rca-wafer-spatial.md`
 For **RCA report writing (Tier 2 markdown or HTML)**: read `rca-reporting.md`
 For **performance issues**: read `performance-optimization.md`, `data-loading.md`
 
