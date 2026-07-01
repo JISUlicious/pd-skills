@@ -67,14 +67,34 @@ disc (set to NaN) — otherwise the KDE bleeds into non-existent regions.
 KDE shows *where* defects concentrate; Ripley's K tests whether the
 overall pattern differs from complete spatial randomness (CSR). If the
 observed K exceeds the CSR envelope, the pattern is clustered at that
-radius; if below, it's regular.
+radius; if below, it's regular. Prefer the variance-stabilized
+**L(r) − r** (0 under CSR) over raw K — it's easier to read against the
+envelope.
+
+**Two corrections are mandatory on a wafer, or you'll misread the plot:**
+
+1. **Edge correction.** The wafer is a bounded disc, so points near the
+   rim have fewer neighbours *purely from the boundary* — uncorrected K
+   is biased downward and mimics "regularity". Use an isotropic
+   (Ripley) edge correction.
+2. **Right null region.** Generate the CSR envelope over the **wafer
+   disc**, not the bounding box, or the envelope itself is wrong.
 
 ```python
-# pointpats or astropy provides a proper implementation; sketch:
+# pointpats/astropy provide implementations; sketch with edge correction:
 from pointpats import ripley
-k_obs, radii = ripley.k_estimate(pts.T, support=np.linspace(0, 50, 50))
-env_lo, env_hi = ripley.k_envelope(pts.T, n_permutations=99)
+# support in mm; hull = the wafer disc, not the point bounding box
+k_obs, radii = ripley.k_estimate(pts.T, support=np.linspace(0, 50, 50),
+                                 edge_correction="ripley")
+env_lo, env_hi = ripley.k_envelope(pts.T, n_permutations=99, hull="disc")
+L_minus_r = np.sqrt(k_obs / np.pi) - radii     # variance-stabilized
 ```
+
+**CSR is a *naive* null for wafers.** Real wafers have structure from die
+layout, edge-exclusion zones, and reticle fields, so a CSR rejection is
+expected even for a healthy process. Treat departures from CSR as a
+*screen* that sends you to the pattern taxonomy below — not as proof of
+a special cause.
 
 A wafer showing clustering at r=5-15 mm suggests a localized process
 event (a fixture scratch, a nozzle plug). Clustering at r > 50 mm

@@ -59,20 +59,29 @@ def diff_in_diff(df, time_col, group_col, outcome, change_time,
     df = df.copy()
     df["post"]    = (df[time_col] >= change_time).astype(int)
     df["treated"] = (df[group_col] == treated_value).astype(int)
-    model = smf.ols(f"{outcome} ~ post + treated + post:treated", data=df).fit()
+    # 그룹으로 SE 클러스터링: 반복된 단위별 관측치는 계열 상관을 가지므로
+    # 일반 OLS SE는 분산을 과소평가하고 유의성을 부풀립니다
+    # (Bertrand-Duflo-Mullainathan 2004). 처리가 변하는 단위로 클러스터링하세요.
+    model = smf.ols(f"{outcome} ~ post + treated + post:treated", data=df).fit(
+        cov_type="cluster", cov_kwds={"groups": df[group_col]})
     did_estimate = model.params["post:treated"]
     print(model.summary().tables[1])
     print(f"\nDiD estimate: {did_estimate:+.4f}  (95% CI: "
           f"[{model.conf_int().loc['post:treated',0]:.4f}, "
           f"{model.conf_int().loc['post:treated',1]:.4f}])")
-    # 정상성: 평행추세 점검 (양 그룹의 pre 기간 시각화)
     return model
 ```
 
 DiD는 pre 기간의 **평행추세(parallel trends)**를 가정합니다 — 변화가
-없었다면 처리군과 대조군이 함께 움직였을 것이라는 가정입니다. 항상 양
-그룹의 pre 기간을 플롯하세요. T 이전부터 추세가 발산했다면 DiD는
-무효입니다.
+없었다면 처리군과 대조군이 함께 움직였을 것이라는 가정입니다. pre 기간을
+플롯하는 것은 눈으로 하는 점검이고, 정식 검정은 **플라시보 / 사전추세
+회귀**입니다 — 변화 *이전*의 시점 더미와 `treated`를 상호작용시켜 어느
+것도 유의하지 않음을 확인하세요. 사전 기간 상호작용이 유의하면 추세가
+이미 발산한 것이며 DiD는 무효입니다.
+
+**클러스터 수 부족 주의:** 클러스터 SE는 *클러스터 수*에 대해 점근적입니다.
+그룹이 ~40개 미만이면 신뢰할 수 없으므로 닫힌 형태 CI 대신 wild-cluster
+부트스트랩(`wildboottest`)을 사용하세요.
 
 ## 성향 점수 매칭 — 무작위화되지 않은 관측 비교
 
@@ -83,28 +92,38 @@ DiD를 사용할 수 없을 때(깨끗한 pre/post가 없을 때), 처리 단위
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
 
-def propensity_match(df, treatment_col, outcome_col, covariates, caliper=0.1):
+def propensity_match(df, treatment_col, outcome_col, covariates, caliper=0.2):
+    """성향 점수의 LOGIT에 대해 1:1 최근접 이웃 매칭. ATT(처리군에 대한
+    효과)를 반환합니다 — 1:1 매칭은 처리 단위를 유지하고 그와 닮은 대조
+    단위를 찾으므로 모집단 ATE를 추정하지 *않습니다*. `caliper`는 logit-PS의
+    SD 단위입니다(Austin 2011은 0.2를 권장)."""
     X = df[covariates].fillna(df[covariates].median())
     t = df[treatment_col].astype(int)
-    # 성향 점수 추정
-    ps_model = LogisticRegression(max_iter=1000).fit(X, t)
-    ps = ps_model.predict_proba(X)[:, 1]
-    df = df.assign(ps=ps)
+    ps = LogisticRegression(max_iter=1000).fit(X, t).predict_proba(X)[:, 1]
+    # logit 스케일에서 매칭 — 원 확률은 0/1 근처에서 압축되므로 고정 확률
+    # 캘리퍼는 꼬리에서 너무 느슨합니다.
+    logit_ps = np.log(ps / (1 - ps))
+    df = df.assign(logit_ps=logit_ps)
+    cal = caliper * logit_ps.std()
     treated = df[df[treatment_col] == 1].copy()
     control = df[df[treatment_col] == 0].copy()
-    # 1:1 PS 최근접 이웃 (나쁜 매치는 캘리퍼로 제거)
-    nn = NearestNeighbors(n_neighbors=1).fit(control[["ps"]].values)
-    dist, idx = nn.kneighbors(treated[["ps"]].values)
-    keep = dist.ravel() < caliper
-    matched = pd.concat([
-        treated.iloc[keep],
-        control.iloc[idx.ravel()[keep]],
-    ])
-    ate = (matched.loc[matched[treatment_col]==1, outcome_col].mean()
+    nn = NearestNeighbors(n_neighbors=1).fit(control[["logit_ps"]].values)
+    dist, idx = nn.kneighbors(treated[["logit_ps"]].values)
+    keep = dist.ravel() < cal
+    matched = pd.concat([treated.iloc[keep],
+                         control.iloc[idx.ravel()[keep]]])
+    att = (matched.loc[matched[treatment_col]==1, outcome_col].mean()
          - matched.loc[matched[treatment_col]==0, outcome_col].mean())
+
+    # 균형 점검 — 신뢰성 게이트. 매칭 후 공변량별 |SMD| < 0.1이면 두 군이
+    # 비교 가능; 그렇지 않으면 추정치는 여전히 교란되어 있습니다.
+    mt = matched[matched[treatment_col]==1]; mc = matched[matched[treatment_col]==0]
+    smd = ((mt[covariates].mean() - mc[covariates].mean()).abs()
+           / df[covariates].std())
     print(f"Matched n: {keep.sum()} pairs (of {len(treated)} treated units)")
-    print(f"ATE estimate: {ate:+.4f}")
-    return matched, ate
+    print(f"ATT estimate: {att:+.4f}")
+    print(f"Max post-match |SMD|: {smd.max():.3f}  (want < 0.10)")
+    return matched, att, smd
 ```
 
 ## `dowhy` — 명시적 가정을 가진 원칙적 인과 추론
@@ -171,8 +190,10 @@ print(f"  Data subset:          new = {refute_subset.new_effect:+.4f}   (강건 
 - **발생 원인 (occurrence cause)** — *왜 발생했는가?* 결함을 만들어낸
   물리 / 공정 사슬. 이를 되돌리는 것이 D6 시정 조치입니다.
 - **유출 원인 (escape cause)** — *왜 감지가 임팩트 전에 잡지 못했는가?*
-  결함이 빠져나가게 한 모니터링 / SPC / 감사 공백. 이를 닫는 것이 D7
-  예방 조치입니다.
+  결함이 빠져나가게 한 모니터링 / SPC / 감사 공백. 정통 8D에서 유출
+  지점은 D4에서 *식별*되고, 그 구체적 수정은 D6에서 이뤄질 수 있으며,
+  D7은 더 넓은 시스템적 예방 — 관리 계획 / FMEA 업데이트와 자매 라인·
+  제품으로의 **수평 전개(read-across)** 입니다.
 
 **발생 원인만 보고하는 것** — 가장 흔한 D4 실패 — 은 유출을 열어두어
 발생 메커니즘이 다시 촉발되는 다음 번에 같은 결함이 재발하도록

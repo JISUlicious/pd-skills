@@ -65,14 +65,32 @@ fig.update_layout(title="결함 KDE — 150 mm 웨이퍼",
 
 KDE는 결함이 *어디에* 집중되는지 보여줍니다. Ripley의 K는 전체 패턴이
 완전 공간 무작위성(CSR)과 다른지 검정합니다. 관측된 K가 CSR 봉투를
-초과하면 그 반경에서 패턴은 군집되어 있고, 아래이면 규칙적입니다.
+초과하면 그 반경에서 패턴은 군집되어 있고, 아래이면 규칙적입니다. 원
+K보다 분산 안정화된 **L(r) − r**(CSR에서 0)을 선호하세요 — 봉투와
+비교해 읽기 쉽습니다.
+
+**웨이퍼에서는 두 가지 보정이 필수입니다. 안 하면 플롯을 오독합니다:**
+
+1. **엣지 보정.** 웨이퍼는 경계가 있는 원반이므로 림 근처 점은 *경계
+   때문에만* 이웃이 적습니다 — 보정 안 한 K는 아래로 편향되어 "규칙성"을
+   흉내 냅니다. 등방(Ripley) 엣지 보정을 사용하세요.
+2. **올바른 귀무 영역.** CSR 봉투를 바운딩 박스가 아니라 **웨이퍼 원반**
+   위에서 생성하세요. 아니면 봉투 자체가 틀립니다.
 
 ```python
-# pointpats 또는 astropy가 제대로 된 구현을 제공; 스케치:
+# pointpats/astropy가 구현 제공; 엣지 보정 포함 스케치:
 from pointpats import ripley
-k_obs, radii = ripley.k_estimate(pts.T, support=np.linspace(0, 50, 50))
-env_lo, env_hi = ripley.k_envelope(pts.T, n_permutations=99)
+# support는 mm 단위; hull = 점 바운딩 박스가 아니라 웨이퍼 원반
+k_obs, radii = ripley.k_estimate(pts.T, support=np.linspace(0, 50, 50),
+                                 edge_correction="ripley")
+env_lo, env_hi = ripley.k_envelope(pts.T, n_permutations=99, hull="disc")
+L_minus_r = np.sqrt(k_obs / np.pi) - radii     # 분산 안정화
 ```
+
+**CSR은 웨이퍼에 대해 *순진한* 귀무가설입니다.** 실제 웨이퍼는 다이
+레이아웃, 엣지 배제 영역, 레티클 필드로 인한 구조를 가지므로 건강한
+공정에서도 CSR 기각은 예상됩니다. CSR로부터의 이탈은 아래 패턴 분류로
+보내는 *스크리닝*으로 취급하고, 특수 원인의 증명으로 취급하지 마세요.
 
 r=5-15 mm에서 군집을 보이는 웨이퍼는 국소화된 공정 사건(픽스처 스크래치,
 노즐 막힘)을 시사합니다. r > 50 mm에서의 군집은 전역 기울기(온도,

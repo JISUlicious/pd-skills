@@ -132,20 +132,33 @@ import numpy as np
 import pandas as pd
 import ruptures as rpt
 
-def detect_changepoints(series, model="rbf", min_size=30, penalty=None):
+def detect_changepoints(series, model="rbf", min_size=30, penalty=None,
+                        ref_window=100):
     """지표 분포가 변하는 지점의 인덱스를 반환.
 
     series   : 1-D numpy 배열 또는 pd.Series (시간 순서 필수)
     model    : "rbf" (기본, 강건), "l2" (가우시안 평균 이동),
                "l1" (중앙값 이동, 이상치에 강건)
     min_size : 변화점 사이의 최소 샘플 수
-    penalty  : None이면 log(n) * 분산 사용 (BIC 스타일); 높이면 큰 변화만
-               탐지, 낮추면 더 많이 탐지
+    penalty  : None이면 모델별로 선택(아래 참조); 높이면 큰 변화만 탐지,
+               낮추면 더 많이 탐지
+    ref_window: model="l2"의 노이즈 스케일 추정에 쓰는 샘플 수
     """
     s = np.asarray(series, dtype=np.float64)
     n = len(s)
     if penalty is None:
-        penalty = np.log(n) * float(np.var(s))
+        # 페널티는 선택한 모델의 비용 스케일과 맞아야 합니다.
+        # - l2 비용은 잔차 제곱합 → 노이즈 σ²에 비례. var(s)가 아니라
+        #   안정된 참조 윈도우에서 σ²를 추정하세요: 전체 분산은 탐지하려는
+        #   바로 그 이동으로 부풀려져 페널티를 높이고 UNDER-분할합니다.
+        # - rbf 비용은 정규화된 커널 Gram 행렬([0,1] 값) → O(1)이므로
+        #   var(s)를 곱하는 것은 차원적으로 틀립니다. ~log(n)을 쓰고 아래
+        #   시각적 점검으로 조정하세요.
+        if model == "l2":
+            sigma2 = float(np.var(s[:ref_window])) or float(np.var(s))
+            penalty = np.log(n) * sigma2
+        else:                         # rbf / l1
+            penalty = np.log(n)
     algo = rpt.Pelt(model=model, min_size=min_size).fit(s)
     bkps = algo.predict(pen=penalty)
     return bkps[:-1]                  # 끝점 제거
@@ -263,18 +276,27 @@ def shewhart_chart(values, subgroup_size=5):
 ### 느린 드리프트용 EWMA 차트
 
 ```python
-def ewma_chart(values, lambda_=0.2, L=3):
+def ewma_chart(values, lambda_=0.2, L=3, ref_window=50):
     """EWMA 관리도 — 작고 지속적인 드리프트에 민감.
-    lambda_ : 가중 인자 (0.05–0.3); 작을수록 더 매끄럽고 느림
-    L       : 시그마 단위의 관리 한계 폭 (기본 3)
+    lambda_    : 가중 인자 (0.05–0.3); 작을수록 더 매끄럽고 느림
+    L          : 시그마 단위의 관리 한계 폭 (기본 3)
+    ref_window : target/sigma 설정에 쓰는 샘플 수. 전체 시리즈가 아니라
+                 안정된 참조 윈도우에서 추정하세요 — 드리프트된 시리즈는
+                 평균을 이상 쪽으로 끌어당겨 이상을 가립니다(CUSUM 절이
+                 경고하는 바로 그 버그).
     """
     s = np.asarray(values, dtype=np.float64)
-    target, sigma = s.mean(), s.std()
+    ref = s[:ref_window]
+    target, sigma = ref.mean(), ref.std()
     z = np.zeros(len(s)); z[0] = target
     for i in range(1, len(s)):
         z[i] = lambda_ * s[i] + (1 - lambda_) * z[i-1]
-    ucl = target + L * sigma * np.sqrt(lambda_ / (2 - lambda_))
-    lcl = target - L * sigma * np.sqrt(lambda_ / (2 - lambda_))
+    # 정확한 시변 한계: 분산이 점근값을 향해 커지므로, 초기 점은
+    # 정상상태 공식보다 더 TIGHT한 한계를 가집니다.
+    i = np.arange(1, len(s) + 1)
+    width = L * sigma * np.sqrt(lambda_ / (2 - lambda_)
+                                * (1 - (1 - lambda_) ** (2 * i)))
+    ucl, lcl = target + width, target - width
     violations = np.where((z > ucl) | (z < lcl))[0]
     return {"ewma": z, "ucl": ucl, "lcl": lcl, "violations": violations}
 ```
@@ -402,7 +424,7 @@ HTML 출력 사양(§ 7b, 그대로 사용할 CSS 블록 포함)은
 | 자기상관 데이터에 SPC | 거의 매 부분군마다 거짓 알람 | `series.autocorr()` 점검; > 0.5이면 AR(1) 잔차 차트화 |
 | "가장 영향받은" 엔티티만 골라쓰기 | 헤드라인 원인이 시스템 드라이버가 아니라 이상치 | 모든 엔티티 스윕; Bonferroni-유의한 lift 요구 |
 | 표면 원인 vs 근본 원인 혼동 | "압력이 높았다" — 그런데 *왜* 압력이 높았는가? | 5-why 깊이 적용; 근본은 직접 변화의 상류 |
-| 보정 없는 다중 검정 | "940 센서에 α=0.05로 47개 유의 요인 발견" | Bonferroni 또는 BH-FDR; SECOM 규모는 ~5% 거짓 양성 예상 |
+| 보정 없는 다중 검정 | "940 센서에 α=0.05로 47개 유의 요인 발견" | Bonferroni는 family-wise 오류를 통제(*어떤* 거짓 양성이라도 나올 확률 ≤5% — 보수적); BH-FDR은 거짓 발견율을 통제(*선언된* 발견의 ~5%가 거짓). SECOM 규모에서는 보통 BH-FDR이 옳은 절충. |
 | 효과 크기 없는 p-값 보고 | 5pp 계절성을 가진 지표의 0.1pp 이동에 "p < 0.0001" | 항상 p-값을 η² / Cohen's d / lift와 함께 보고 |
 | 발생 원인만 보고 | "레시피 변경이 결함을 유발함 — 종료" (조용히: 모니터가 잡지 못했고, 재발할 것) | **발생(occurrence)** 과 **유출(escape)** 을 모두 보고. `rca-causal-analysis.md` § 4.5 참조. D7이 재발 방지를 위해 유출 원인이 필요합니다. |
 | 검증 기간 없이 D5 성공 선언 | "지난주 결함률이 좋아 보였음, CAPA 종료" | `rca-d5-verification.md` 사용: ≥20 관리 상태 부분군 + 변동 점검 + 검정력 계획된 n |

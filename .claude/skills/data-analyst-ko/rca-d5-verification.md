@@ -24,29 +24,34 @@
 실제로 얼마나 많은 사후 데이터가 필요한지 계산하세요. 작은 n으로
 검증하고 완료로 부르면 거짓 통과율이 부풀려집니다.
 
+**효과 크기 정의를 분석 단위와 맞추세요.** 결함률은 웨이퍼별 베르누이
+결과에 대한 *비율*입니다 — p=5%에서 웨이퍼별 SD는 √(0.05·0.95) ≈ 0.22이며,
+작은 "비율 표준편차"가 아닙니다. 지어낸 비율 SD를 연속 평균 검정력
+루틴에 넣으면 말이 안 되는 n이 나옵니다. 비율 효과 크기(Cohen's *h*)를
+사용하세요:
+
 ```python
 from statsmodels.stats.power import NormalIndPower
+from statsmodels.stats.proportion import proportion_effectsize
 
-# D3(봉쇄)과 D4(근본 원인)의 입력값:
-pre_std       = 0.030               # pre 기간 결함률 표준편차
-target_delta  = 0.020               # 봐야 할 개선(2 pp)
-effect_size   = target_delta / pre_std
+# D3(봉쇄)과 D4(근본 원인)의 입력값 — n은 WAFER 단위:
+p_pre    = 0.070                    # 수정 전 결함률
+p_target = 0.050                    # 도달해야 할 비율(2 pp 개선)
+h = proportion_effectsize(p_pre, p_target)   # Cohen's h — 비율에 맞는 ES
 
-analysis = NormalIndPower()
-n_per_group = analysis.solve_power(
-    effect_size=effect_size,
+n_per_group = NormalIndPower().solve_power(
+    effect_size=h,
     alpha=0.05, power=0.80,
     ratio=1.0, alternative="larger",  # "개선했다"는 단측
 )
-print(f"검정력=0.80에서 그룹당 n≥{int(n_per_group)+1} 필요")
+print(f"검정력=0.80에서 그룹당 WAFER n≥{int(n_per_group)+1} 필요")
 ```
 
-이항(결함 / 비결함) 지표의 경우, arcsin 변환된 비율에
-`statsmodels.stats.power.NormalIndPower`를 사용하거나
-`proportions_ztest`의 직접 검정력 계산을 사용하세요. 모든 검증 결과와
-함께 `n_needed`를 보고하세요 — "2주 동안 실행함"은 설계가 아니고,
-"380 웨이퍼가 필요했고, 415를 관측했으며, 검정력 0.84 달성"이
-설계입니다.
+대신 *연속* CTQ(합격/불합격 비율이 아닌 측정된 치수)를 모니터링한다면
+`NormalIndPower`의 평균/SD 형태가 맞습니다 — 다만 n이 웨이퍼를 세는지
+집계된 로트를 세는지 명시하세요. 모든 검증 결과와 함께 `n_needed`를
+보고하세요: "2주 동안 실행함"은 설계가 아니고, "380 웨이퍼가 필요했고,
+415를 관측했으며, 검정력 0.84 달성"이 설계입니다.
 
 ## Pre/post 실험 설계
 
@@ -79,12 +84,17 @@ delta = post_samples.mean() - pre_samples.mean()
 print(f"Δmean = {delta:+.4f}  Welch p = {p:.4f}")
 ```
 
-### 2. 변동
+### 2. 변동 (연속 CTQ 전용)
 
 사후 분산 vs 사전 분산 — Levene 검정(비정규성에 강건) 또는 고전적
 F-검정. **평균을 낮추면서 분산을 두 배로 만드는 수정은 헤드라인 결함률을
 줄이면서 새로운 실패 모드를 도입할 수 있습니다.** 이 검정이 그것을
 잡습니다.
+
+**범위:** 이것은 *연속* 특성(측정된 치수, 힘, 두께)에 대한 점검입니다.
+**비율**(결함률)의 경우 분산 σ²=p(1−p)는 평균의 결정론적 함수이므로,
+비율이 떨어지면 "사후 σ ≤ 사전 σ"는 자동이며 독립적 정보를 담지
+않습니다 — 비율 지표에서는 건너뛰세요.
 
 ```python
 lev = stats.levene(pre_samples, post_samples, center="median")

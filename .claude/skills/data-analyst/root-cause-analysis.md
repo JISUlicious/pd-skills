@@ -135,20 +135,34 @@ import numpy as np
 import pandas as pd
 import ruptures as rpt
 
-def detect_changepoints(series, model="rbf", min_size=30, penalty=None):
+def detect_changepoints(series, model="rbf", min_size=30, penalty=None,
+                        ref_window=100):
     """Return indices where the metric distribution changes.
 
     series   : 1-D numpy array or pd.Series (chronological order required)
     model    : "rbf" (default, robust), "l2" (gaussian mean shift),
                "l1" (median shift, robust to outliers)
     min_size : minimum samples between change points
-    penalty  : if None, uses log(n) * variance (BIC-style); raise to detect
+    penalty  : if None, chosen per model (see below); raise to detect
                fewer (only large) change points; lower to detect more
+    ref_window: samples used to estimate the noise scale for model="l2"
     """
     s = np.asarray(series, dtype=np.float64)
     n = len(s)
     if penalty is None:
-        penalty = np.log(n) * float(np.var(s))
+        # The penalty must match the cost scale of the chosen model.
+        # - l2 cost is sum of squared residuals → scales with noise σ².
+        #   Estimate σ² from a STABLE reference window, not var(s): the
+        #   full-series variance is inflated by the very shift you're
+        #   detecting, which raises the penalty and UNDER-segments.
+        # - rbf cost uses a normalised kernel Gram matrix (values in
+        #   [0,1]) → O(1), so multiplying by var(s) is dimensionally wrong.
+        #   Use ~log(n) and tune with the visual check below.
+        if model == "l2":
+            sigma2 = float(np.var(s[:ref_window])) or float(np.var(s))
+            penalty = np.log(n) * sigma2
+        else:                         # rbf / l1
+            penalty = np.log(n)
     algo = rpt.Pelt(model=model, min_size=min_size).fit(s)
     bkps = algo.predict(pen=penalty)
     return bkps[:-1]                  # drop the trailing endpoint
@@ -269,18 +283,27 @@ def shewhart_chart(values, subgroup_size=5):
 ### EWMA chart for slow drifts
 
 ```python
-def ewma_chart(values, lambda_=0.2, L=3):
+def ewma_chart(values, lambda_=0.2, L=3, ref_window=50):
     """EWMA control chart — sensitive to small persistent drifts.
-    lambda_ : weighting factor (0.05–0.3); smaller = smoother, slower
-    L       : control limit width in sigma (3 default)
+    lambda_    : weighting factor (0.05–0.3); smaller = smoother, slower
+    L          : control limit width in sigma (3 default)
+    ref_window : samples used to set target/sigma. Estimate from a STABLE
+                 reference window, NOT the full series — a drifted series
+                 pulls the mean toward the excursion and hides it (the
+                 same bug the CUSUM section warns about).
     """
     s = np.asarray(values, dtype=np.float64)
-    target, sigma = s.mean(), s.std()
+    ref = s[:ref_window]
+    target, sigma = ref.mean(), ref.std()
     z = np.zeros(len(s)); z[0] = target
     for i in range(1, len(s)):
         z[i] = lambda_ * s[i] + (1 - lambda_) * z[i-1]
-    ucl = target + L * sigma * np.sqrt(lambda_ / (2 - lambda_))
-    lcl = target - L * sigma * np.sqrt(lambda_ / (2 - lambda_))
+    # Exact time-varying limits: variance grows toward the asymptote, so
+    # early points get TIGHTER limits than the steady-state formula.
+    i = np.arange(1, len(s) + 1)
+    width = L * sigma * np.sqrt(lambda_ / (2 - lambda_)
+                                * (1 - (1 - lambda_) ** (2 * i)))
+    ucl, lcl = target + width, target - width
     violations = np.where((z > ucl) | (z < lcl))[0]
     return {"ewma": z, "ucl": ucl, "lcl": lcl, "violations": violations}
 ```
@@ -410,7 +433,7 @@ verbatim CSS block (§ 7b).
 | SPC on autocorrelated data | False alarms every other subgroup | Check `series.autocorr()`; if > 0.5, chart AR(1) residuals |
 | Cherry-picking the "most affected" entity | Headline cause is the outlier, not the systemic driver | Sweep all entities; require Bonferroni-significant lift |
 | Surface-cause vs. root-cause confusion | "Pressure was high" — but *why* was pressure high? | Apply 5-why depth; the root is upstream of the proximate change |
-| Multiple testing without correction | "Found 47 significant factors" with α=0.05 across 940 sensors | Bonferroni or BH-FDR; for SECOM-scale, expect ~5% false positives |
+| Multiple testing without correction | "Found 47 significant factors" with α=0.05 across 940 sensors | Bonferroni controls the family-wise error (≤5% chance of *any* false positive — conservative); BH-FDR controls the false discovery rate (~5% of *declared* discoveries are false). At SECOM scale BH-FDR is usually the right trade-off. |
 | Reporting p-value without effect size | "p < 0.0001" on a 0.1pp shift in a metric with 5pp seasonality | Always pair p-values with η² / Cohen's d / lift |
 | Reporting only the occurrence cause | "Recipe change caused the defect — closed" (silently: no monitor caught it, will recur) | Report **occurrence** AND **escape** — see `rca-causal-analysis.md` § 4.5. D7 needs the escape to prevent recurrence. |
 | Declaring D5 success without a verification period | "Defect rate looked good last week, closing the CAPA" | Use `rca-d5-verification.md`: ≥20 in-control subgroups + variation check + power-planned n |

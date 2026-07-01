@@ -60,20 +60,31 @@ def diff_in_diff(df, time_col, group_col, outcome, change_time,
     df = df.copy()
     df["post"]    = (df[time_col] >= change_time).astype(int)
     df["treated"] = (df[group_col] == treated_value).astype(int)
-    model = smf.ols(f"{outcome} ~ post + treated + post:treated", data=df).fit()
+    # Cluster SEs by group: repeated per-unit observations are serially
+    # correlated, so plain OLS SEs understate variance and inflate
+    # significance (Bertrand-Duflo-Mullainathan 2004). Cluster on the
+    # unit that the treatment varies at.
+    model = smf.ols(f"{outcome} ~ post + treated + post:treated", data=df).fit(
+        cov_type="cluster", cov_kwds={"groups": df[group_col]})
     did_estimate = model.params["post:treated"]
     print(model.summary().tables[1])
     print(f"\nDiD estimate: {did_estimate:+.4f}  (95% CI: "
           f"[{model.conf_int().loc['post:treated',0]:.4f}, "
           f"{model.conf_int().loc['post:treated',1]:.4f}])")
-    # Sanity: parallel-trends check (visualize pre-period for both groups)
     return model
 ```
 
 DiD assumes **parallel trends** in the pre-period — the treated and
-control groups would have moved together absent the change. Always plot
-the pre-period for both groups; if their trends diverge before T, DiD
-is invalid.
+control groups would have moved together absent the change. Plotting
+the pre-period is the eyeball check; the formal test is a **placebo /
+pre-trend regression** — interact `treated` with per-period time dummies
+*before* the change and confirm none are significant. If pre-period
+interactions are significant, the trends already diverged and DiD is
+invalid.
+
+**Few-clusters caveat:** clustered SEs are asymptotic in the *number of
+clusters*. With fewer than ~40 groups they are unreliable — use a
+wild-cluster bootstrap (`wildboottest`) instead of the closed-form CI.
 
 ## Propensity Score Matching — for non-randomized observational comparisons
 
@@ -84,28 +95,40 @@ similar control units on observed covariates:
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
 
-def propensity_match(df, treatment_col, outcome_col, covariates, caliper=0.1):
+def propensity_match(df, treatment_col, outcome_col, covariates, caliper=0.2):
+    """1:1 nearest-neighbour matching on the LOGIT of the propensity score.
+    Returns the ATT (effect on the treated) — 1:1 matching keeps treated
+    units and finds controls that look like them, so it does NOT estimate
+    the population ATE. `caliper` is in units of SD of the logit-PS
+    (Austin 2011 recommends 0.2)."""
     X = df[covariates].fillna(df[covariates].median())
     t = df[treatment_col].astype(int)
-    # Estimate propensity score
-    ps_model = LogisticRegression(max_iter=1000).fit(X, t)
-    ps = ps_model.predict_proba(X)[:, 1]
-    df = df.assign(ps=ps)
+    ps = LogisticRegression(max_iter=1000).fit(X, t).predict_proba(X)[:, 1]
+    # Match on the logit scale — raw probabilities are compressed near 0/1,
+    # so a fixed probability caliper is too loose in the tails.
+    logit_ps = np.log(ps / (1 - ps))
+    df = df.assign(logit_ps=logit_ps)
+    cal = caliper * logit_ps.std()
     treated = df[df[treatment_col] == 1].copy()
     control = df[df[treatment_col] == 0].copy()
-    # 1:1 nearest neighbor on PS (with caliper to drop bad matches)
-    nn = NearestNeighbors(n_neighbors=1).fit(control[["ps"]].values)
-    dist, idx = nn.kneighbors(treated[["ps"]].values)
-    keep = dist.ravel() < caliper
-    matched = pd.concat([
-        treated.iloc[keep],
-        control.iloc[idx.ravel()[keep]],
-    ])
-    ate = (matched.loc[matched[treatment_col]==1, outcome_col].mean()
+    nn = NearestNeighbors(n_neighbors=1).fit(control[["logit_ps"]].values)
+    dist, idx = nn.kneighbors(treated[["logit_ps"]].values)
+    keep = dist.ravel() < cal
+    matched = pd.concat([treated.iloc[keep],
+                         control.iloc[idx.ravel()[keep]]])
+    att = (matched.loc[matched[treatment_col]==1, outcome_col].mean()
          - matched.loc[matched[treatment_col]==0, outcome_col].mean())
+
+    # Balance check — the credibility gate. Post-match |SMD| < 0.1 per
+    # covariate means the groups are comparable; otherwise the estimate
+    # is still confounded.
+    mt = matched[matched[treatment_col]==1]; mc = matched[matched[treatment_col]==0]
+    smd = ((mt[covariates].mean() - mc[covariates].mean()).abs()
+           / df[covariates].std())
     print(f"Matched n: {keep.sum()} pairs (of {len(treated)} treated units)")
-    print(f"ATE estimate: {ate:+.4f}")
-    return matched, ate
+    print(f"ATT estimate: {att:+.4f}")
+    print(f"Max post-match |SMD|: {smd.max():.3f}  (want < 0.10)")
+    return matched, att, smd
 ```
 
 ## `dowhy` — for principled causal inference with explicit assumptions
@@ -173,8 +196,10 @@ both.
   chain that produced the defect. Reversing it is the D6 corrective
   action.
 - **Escape cause** — *why didn't detection catch it before impact?* The
-  monitoring / SPC / audit gap that let the defect slip through.
-  Closing it is the D7 preventive action.
+  monitoring / SPC / audit gap that let the defect slip through. In
+  canonical 8D the escape point is *identified* in D4; its specific fix
+  can land in D6, and D7 is the broader systemic prevention — control-plan
+  / FMEA update plus **read-across** to sister lines and products.
 
 **Reporting only the occurrence cause** — the most common D4 failure —
 leaves the escape open, so the same class of defect recurs the next

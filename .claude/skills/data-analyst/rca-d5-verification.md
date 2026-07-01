@@ -26,29 +26,34 @@ you actually need to detect the target improvement with a chosen power.
 Verifying against a small n and calling it done inflates the false-pass
 rate.
 
+**Match the effect-size definition to the unit of analysis.** A defect
+rate is a *proportion* over per-wafer Bernoulli outcomes — the per-wafer
+SD at p=5% is √(0.05·0.95) ≈ 0.22, not a small "rate stddev". Feeding a
+made-up rate SD into a continuous-mean power routine gives a nonsense n.
+Use the proportion effect size (Cohen's *h*):
+
 ```python
 from statsmodels.stats.power import NormalIndPower
+from statsmodels.stats.proportion import proportion_effectsize
 
-# Inputs from D3 (containment) and D4 (root cause):
-pre_std       = 0.030               # pre-period defect rate stddev
-target_delta  = 0.020               # improvement we need to see (2 pp)
-effect_size   = target_delta / pre_std
+# Inputs from D3 (containment) and D4 (root cause) — n is in WAFERS:
+p_pre    = 0.070                    # pre-fix defect rate
+p_target = 0.050                    # rate we need to reach (2 pp better)
+h = proportion_effectsize(p_pre, p_target)   # Cohen's h — the right ES for rates
 
-analysis = NormalIndPower()
-n_per_group = analysis.solve_power(
-    effect_size=effect_size,
+n_per_group = NormalIndPower().solve_power(
+    effect_size=h,
     alpha=0.05, power=0.80,
     ratio=1.0, alternative="larger",  # "we improved" is one-sided
 )
-print(f"Need n≥{int(n_per_group)+1} per group at power=0.80")
+print(f"Need n≥{int(n_per_group)+1} WAFERS per group at power=0.80")
 ```
 
-For binomial (defect / no-defect) metrics, use
-`statsmodels.stats.power.NormalIndPower` on the arcsine-transformed
-proportion or the direct `proportions_ztest` power calculation. Report
-`n_needed` alongside every verification result — "we ran for two weeks"
-is not a design; "we needed 380 wafers, observed 415, achieved power
-0.84" is.
+If instead you monitor a *continuous* CTQ (a measured dimension, not a
+pass/fail rate), the mean/SD form of `NormalIndPower` is correct — just
+state whether n counts wafers or aggregated lots. Report `n_needed`
+alongside every verification result: "we ran for two weeks" is not a
+design; "we needed 380 wafers, observed 415, achieved power 0.84" is.
 
 ## Pre/post experimental design
 
@@ -83,12 +88,18 @@ delta = post_samples.mean() - pre_samples.mean()
 print(f"Δmean = {delta:+.4f}  Welch p = {p:.4f}")
 ```
 
-### 2. Variation
+### 2. Variation (continuous CTQs only)
 
 Post variance vs. pre variance — Levene's test (robust to non-normality)
 or the classical F-test. **A fix that lowers the mean but doubles the
 variance may reduce headline defect rate while introducing new failure
 modes.** This test catches that.
+
+**Scope:** this is a check for *continuous* characteristics (a measured
+dimension, force, thickness). For a **proportion** (defect rate), the
+variance σ²=p(1−p) is a deterministic function of the mean, so "post
+σ ≤ pre σ" is automatic once the rate drops and carries no independent
+information — skip it for rate metrics.
 
 ```python
 lev = stats.levene(pre_samples, post_samples, center="median")
