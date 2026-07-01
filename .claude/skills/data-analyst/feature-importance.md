@@ -79,7 +79,10 @@ predictors, and ranking driven by which rows survived null-dropping.
 ### 1. Multicollinearity audit (VIF)
 
 VIF (Variance Inflation Factor) for column j is `1 / (1 − R²_j)` where
-`R²_j` is from regressing column j on every other predictor. Interpretation:
+`R²_j` is from regressing column j on every other predictor. The
+`vif_table()` helper (plus `mixed_type_vif()` and the cluster-representative
+selector) lives in **`collinearity-diagnostics.md`** — run it there once,
+then act on the tiers below. In modeling context the actions are:
 
 | VIF | Meaning | Action |
 |---:|---|---|
@@ -89,32 +92,7 @@ VIF (Variance Inflation Factor) for column j is `1 / (1 − R²_j)` where
 | > 10 | severe | drop one of the redundant pair, OR switch to Ridge/Lasso |
 
 ```python
-import numpy as np
-import pandas as pd
-
-def vif_table(X: pd.DataFrame) -> pd.DataFrame:
-    """VIF_j = 1 / (1 - R²_j), R²_j from regressing column j on the others."""
-    Xv = X.to_numpy(dtype=np.float64)
-    rows = []
-    for j, col in enumerate(X.columns):
-        y = Xv[:, j]
-        Xrest = np.delete(Xv, j, axis=1)
-        Xd = np.column_stack([np.ones(len(Xrest)), Xrest])
-        beta, *_ = np.linalg.lstsq(Xd, y, rcond=None)
-        yhat = Xd @ beta
-        ss_tot = ((y - y.mean()) ** 2).sum()
-        if ss_tot == 0:
-            vif = float("inf")
-        else:
-            r2 = 1 - ((y - yhat) ** 2).sum() / ss_tot
-            vif = float("inf") if r2 >= 0.9999 else 1 / (1 - r2)
-        rows.append({"feature": col, "R²_on_others": round(float(r2), 4),
-                     "VIF": round(float(vif), 2)})
-    return pd.DataFrame(rows).sort_values("VIF", ascending=False).reset_index(drop=True)
-
-vif = vif_table(X)
-print(vif.to_string(index=False))
-
+vif = vif_table(X)                      # defined in collinearity-diagnostics.md
 severe   = vif.query("VIF > 10")["feature"].tolist()
 moderate = vif.query("5 < VIF <= 10")["feature"].tolist()
 if severe:

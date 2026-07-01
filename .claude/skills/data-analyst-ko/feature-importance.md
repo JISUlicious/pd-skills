@@ -76,7 +76,10 @@ ML 교차 검증은 건너뛰었음을 사용자에게 명시적으로 알립니
 
 칼럼 j에 대한 VIF(분산팽창인수, Variance Inflation Factor)는
 `1 / (1 − R²_j)`로 정의됩니다. `R²_j`는 칼럼 j를 다른 모든 예측 변수에
-대해 회귀했을 때의 결정계수입니다. 해석:
+대해 회귀했을 때의 결정계수입니다. `vif_table()` 헬퍼(그리고
+`mixed_type_vif()`와 클러스터 대표 선택기)는 **`collinearity-diagnostics.md`**
+에 있습니다 — 거기서 한 번 실행한 뒤 아래 등급에 따라 조치하세요.
+모델링 맥락의 조치:
 
 | VIF | 의미 | 조치 |
 |---:|---|---|
@@ -86,32 +89,7 @@ ML 교차 검증은 건너뛰었음을 사용자에게 명시적으로 알립니
 | > 10 | 심각 | 중복 쌍 중 하나를 제거하거나, Ridge/Lasso로 전환 |
 
 ```python
-import numpy as np
-import pandas as pd
-
-def vif_table(X: pd.DataFrame) -> pd.DataFrame:
-    """VIF_j = 1 / (1 - R²_j), R²_j는 칼럼 j를 나머지에 회귀한 결과."""
-    Xv = X.to_numpy(dtype=np.float64)
-    rows = []
-    for j, col in enumerate(X.columns):
-        y = Xv[:, j]
-        Xrest = np.delete(Xv, j, axis=1)
-        Xd = np.column_stack([np.ones(len(Xrest)), Xrest])
-        beta, *_ = np.linalg.lstsq(Xd, y, rcond=None)
-        yhat = Xd @ beta
-        ss_tot = ((y - y.mean()) ** 2).sum()
-        if ss_tot == 0:
-            vif = float("inf")
-        else:
-            r2 = 1 - ((y - yhat) ** 2).sum() / ss_tot
-            vif = float("inf") if r2 >= 0.9999 else 1 / (1 - r2)
-        rows.append({"feature": col, "R²_on_others": round(float(r2), 4),
-                     "VIF": round(float(vif), 2)})
-    return pd.DataFrame(rows).sort_values("VIF", ascending=False).reset_index(drop=True)
-
-vif = vif_table(X)
-print(vif.to_string(index=False))
-
+vif = vif_table(X)                      # collinearity-diagnostics.md에 정의됨
 severe   = vif.query("VIF > 10")["feature"].tolist()
 moderate = vif.query("5 < VIF <= 10")["feature"].tolist()
 if severe:
