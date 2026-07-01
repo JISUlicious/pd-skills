@@ -58,7 +58,10 @@ quality static output.
 | Plotly (default), Matplotlib & Seaborn (static), dashboards | `visualization.md` |
 | Categorical, Styler, eval, nullable types, pipe | `advanced-pandas.md` |
 | XGBoost, SHAP, permutation importance, interactions, non-linear drivers | `feature-importance.md` |
-| Root-cause / defect / yield excursion / change-point / SPC / causal | `root-cause-analysis.md` |
+| RCA framework + change-point (PELT/CUSUM) + SPC (Shewhart/EWMA/Cp/Cpk) + decision cheatsheet + anti-patterns | `root-cause-analysis.md` |
+| RCA commonality — Fisher / BH-FDR / cluster collapse / frequent-itemset | `rca-commonality.md` |
+| RCA causal inference — DAG / DiD / propensity / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
+| RCA reporting — Tier 2 template + form guide + self-contained HTML output | `rca-reporting.md` |
 
 ### Task-Specific File Loading
 
@@ -67,7 +70,10 @@ For **data cleaning**: read `data-cleaning.md`, `indexing-selection.md`
 For **feature engineering**: read `data-transformation.md`, `time-series.md`
 For **statistical analysis**: read `statistical-analysis.md`, `visualization.md`
 For **feature importance / non-linear drivers**: read `feature-importance.md`, `statistical-analysis.md`
-For **root-cause / yield / defect / process-excursion analysis**: read `root-cause-analysis.md`, `time-series.md`, `feature-importance.md`
+For **RCA — change-point / SPC / anti-patterns / end-to-end workflow**: read `root-cause-analysis.md`
+For **RCA commonality (which sensors / factors shifted)**: read `root-cause-analysis.md`, `rca-commonality.md`
+For **RCA causal analysis or DOE**: read `rca-causal-analysis.md`
+For **RCA report writing (Tier 2 markdown or HTML)**: read `rca-reporting.md`
 For **performance issues**: read `performance-optimization.md`, `data-loading.md`
 
 ## Workflow

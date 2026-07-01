@@ -56,7 +56,10 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 | Plotly(기본), Matplotlib & Seaborn(정적), 대시보드 | `visualization.md` |
 | Categorical, Styler, eval, nullable 타입, pipe | `advanced-pandas.md` |
 | XGBoost, SHAP, 순열 중요도, 상호작용, 비선형 드라이버 | `feature-importance.md` |
-| 근본 원인 / 결함 / 수율 이상 / 변화점 / SPC / 인과 | `root-cause-analysis.md` |
+| RCA 프레임워크 + 변화점(PELT/CUSUM) + SPC(Shewhart/EWMA/Cp/Cpk) + 의사결정 치트시트 + 안티패턴 | `root-cause-analysis.md` |
+| RCA 공통성 — Fisher / BH-FDR / 클러스터 축소 / 빈발 항목집합 | `rca-commonality.md` |
+| RCA 인과 추론 — DAG / DiD / 성향 / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
+| RCA 보고 — Tier 2 템플릿 + 양식 가이드 + 자체 완결적 HTML 출력 | `rca-reporting.md` |
 
 ### 작업별 파일 로딩
 
@@ -65,7 +68,10 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 **피처 엔지니어링**: `data-transformation.md`, `time-series.md`
 **통계 분석**: `statistical-analysis.md`, `visualization.md`
 **피처 중요도 / 비선형 드라이버**: `feature-importance.md`, `statistical-analysis.md`
-**근본 원인 / 수율 / 결함 / 공정 이상 분석**: `root-cause-analysis.md`, `time-series.md`, `feature-importance.md`
+**RCA — 변화점 / SPC / 안티패턴 / 종단 간 워크플로**: `root-cause-analysis.md`
+**RCA 공통성 (어떤 센서 / 요인이 이동했는가)**: `root-cause-analysis.md`, `rca-commonality.md`
+**RCA 인과 분석 또는 DOE**: `rca-causal-analysis.md`
+**RCA 보고서 작성 (Tier 2 마크다운 또는 HTML)**: `rca-reporting.md`
 **성능 이슈**: `performance-optimization.md`, `data-loading.md`
 
 ## 워크플로
