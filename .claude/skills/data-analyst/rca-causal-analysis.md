@@ -11,6 +11,7 @@ dowhy) and the designed-experiment toolkit (ANOVA / Tukey / effect size).
 - Diff-in-Differences (DiD)
 - Propensity score matching
 - `dowhy` — principled causal inference with explicit assumptions
+- **§ 4.5: Occurrence cause vs escape cause** (two-question protocol)
 - DOE / ANOVA — designed experiments
 - Effect size: statistical vs. practical significance
 
@@ -150,6 +151,51 @@ print(f"  Data subset:          Δ = {refute_subset.new_effect - estimate.value:
 A robust causal estimate survives all three refutations with little
 change. If the placebo refuter shows a large effect (it shouldn't, by
 construction), the original estimate is suspect.
+
+## § 4.5: Occurrence cause vs escape cause
+
+Every defect has **two causes** and the D7 preventive-action step needs
+both.
+
+- **Occurrence cause** — *why did it happen?* The physical / process
+  chain that produced the defect. Reversing it is the D6 corrective
+  action.
+- **Escape cause** — *why didn't detection catch it before impact?* The
+  monitoring / SPC / audit gap that let the defect slip through.
+  Closing it is the D7 preventive action.
+
+**Reporting only the occurrence cause** — the most common D4 failure —
+leaves the escape open, so the same class of defect recurs the next
+time the occurrence mechanism triggers. This is why the same excursion
+often recurs quarterly even after "resolution".
+
+**Two-question protocol:** for every occurrence candidate you verify
+statistically, ask a second question:
+
+> "And what monitor / SPC rule / audit *should* have flagged this before
+> impact — and why didn't it?"
+
+The answer is the escape cause. It might be:
+- No monitor existed on this signal (add SPC on the shifted sensor)
+- A monitor existed but wasn't sensitive enough (Shewhart X-bar missed
+  a sub-3σ drift → switch to EWMA — see `root-cause-analysis.md` § 2)
+- Monitor existed but alarm threshold was wrong (recalibrate)
+- Manual audit was skipped (make it automated)
+
+**Worked example (SECOM style):**
+- Occurrence: recipe v3.2 deploy on 2008-08-21 shifted the s406 cluster
+  by +4.5σ → defect rate rose from 4.8% to 14.0%. D6 action: roll back
+  recipe.
+- Escape: pre-existing SPC on s406 was Shewhart X-bar, which is
+  insensitive to sub-3σ persistent drifts of the kind recipe v3.2
+  induced. D7 action: switch s406 chart to EWMA with λ=0.2, alarm on
+  h=3.5σ.
+
+**Reporting integration.** The Tier 2 report (`rca-reporting.md` § 7)
+must have separate **Occurrence evidence** and **Escape evidence**
+columns in the Candidate causes table. A candidate that has occurrence
+evidence but no escape column signals the D7 gap wasn't analyzed — send
+it back to D4.
 
 ## DOE / ANOVA — for designed experiments
 

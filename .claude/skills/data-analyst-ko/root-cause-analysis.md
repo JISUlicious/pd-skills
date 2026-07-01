@@ -12,6 +12,7 @@ SHAP 값 0.5는 "이 피처가 예측 오차를 줄인다"를 말하는 것이�
 
 ## 목차
 
+- § 0: 8D 프레임워크 맥락 (D0-D8 + CAPA 참고)
 - `feature-importance.md` 대비 이 파일을 사용할 때
 - 환경 설정 — 선택적 의존성 + 시간 컷오프 분할
 - § 1: 변화점 탐지 (PELT, CUSUM)
@@ -24,7 +25,35 @@ SHAP 값 0.5는 "이 피처가 예측 오차를 줄인다"를 말하는 것이�
 **확장 참조 (`SKILL.md`에서 레벨-1):**
 - `rca-commonality.md`     — Fisher / BH-FDR / 클러스터 축소 (기존 § 3)
 - `rca-causal-analysis.md` — DAG / DiD / dowhy / DOE (기존 § 4 + § 5)
+- `rca-qualitative.md`     — 파레토 / 어골도 / 5-Why + 반증
+- `rca-d5-verification.md` — 수정이 작동했는가?
+- `rca-wafer-spatial.md`   — 웨이퍼 맵 / 공간적 결함 패턴
 - `rca-reporting.md`       — Tier 2 템플릿 + 양식 가이드 + HTML (기존 § 7 + § 7a + § 7b)
+
+## § 0. 8D 프레임워크 맥락
+
+규제 제조 산업(자동차, 항공우주, 의료기기)에서 RCA는 **8D 프레임워크**
+(포드의 원조 *Eight Disciplines*) 안에 자리 잡습니다. 이 스킬이
+생성하는 Tier 2 보고서가 곧 **D4 증거 산출물**입니다 — 잘 수행된 D4는
+D5-D8을 수월하게 만듭니다.
+
+| 8D 단계 | 의미 | 이 스킬이 돕는 지점 |
+|---|---|---|
+| **D0** — 계획 | 비상 대응 기준 충족? | 범위 외 |
+| **D1** — 팀 | 교차기능 팀 구성 | 범위 외 |
+| **D2** — 문제 | 정량화된 문제 진술 | § 1 CPD가 변화 확인(지표, 시점, 크기) |
+| **D3** — 봉쇄 | 고객 보호 임시 조치 | 범위 외, D3 상태는 Tier 2 헤더에 포함 |
+| **D4** — 근본 원인 | *이것이 RCA.* | 전체 스킬 적용: §§ 1–2, `rca-commonality.md`, `rca-causal-analysis.md`, `rca-qualitative.md` |
+| **D5** — 검증 | 수정이 작동함을 증명 | `rca-d5-verification.md` |
+| **D6** — 실행 | 영구 조치 전개 | 범위 외 |
+| **D7** — 예방 | SOP / 관리 계획 / FMEA 업데이트 | 유출 원인 보고 (`rca-causal-analysis.md` 참조) |
+| **D8** — 축하 | 팀 인정 | 범위 외 |
+
+**CAPA** (Corrective and Preventive Action)는 규제 산업에서 D5-D7을
+지칭하는 이름입니다. FDA / ISO / IATF 감사가 요구하는 기록은 Tier 2
+보고서의 엄격한 상위 집합입니다 — 같은 내용에 서명된 감사 기록이
+추가됩니다. 분석을 CAPA 기록이 보고서에서 직접 추출될 수 있게
+구조화하세요.
 
 ## 이 파일을 사용할 때 vs `feature-importance.md`를 사용할 때
 
@@ -321,20 +350,29 @@ X가 Y를 일으켰다고 주장하기 전에 역인과, 공통 원인, 선택 �
 ```
 START: 어떤 종류의 질문인가?
    │
+   ├── "실패 모드 백로그가 큰데 어디서 시작?"
+   │       └→ 파레토 (rca-qualitative.md) — 상위 20% 모드 = 손실의 80%
+   │
+   ├── "이 실패 모드의 가능한 원인은?"
+   │       └→ 어골도 → 5-Why → 통계적 검증 (rca-qualitative.md)
+   │
    ├── "Y가 오랜 기간 나쁘다" (정상 상태)
-   │       └→ SPC + Cp/Cpk + 공통성 (§§ 2, 3)
+   │       └→ SPC + Cp/Cpk + 공통성 (§ 2 + rca-commonality.md)
    │
    ├── "Y가 시점 T에 이동했다" (이상)
    │       └→ CPD로 시점 확인 (§ 1)
-   │          └→ pre-vs-post 공통성 (§ 3)
-   │             └→ T에 알려진 변화가 있다면 DiD (§ 4)
-   │                └→ 인과 반박 (§ 4: dowhy)
+   │          └→ pre-vs-post 공통성 (rca-commonality.md)
+   │             └→ T에 알려진 변화가 있다면 DiD (rca-causal-analysis.md)
+   │                └→ 인과 반박 (rca-causal-analysis.md: dowhy)
    │
    ├── "DOE를 수행했는데 무엇이 중요했는가?"
-   │       └→ ANOVA + Tukey HSD + 효과 크기 (§ 5)
+   │       └→ ANOVA + Tukey HSD + 효과 크기 (rca-causal-analysis.md)
+   │
+   ├── "결함에 (x, y) 좌표가 있다 — 공간 패턴?"
+   │       └→ KDE + Ripley의 K + 패턴 분류 (rca-wafer-spatial.md)
    │
    └── "수정을 적용했는데 효과가 있었는가?"
-           └→ DiD pre/post + 수정 이후 SPC 모니터링 (§§ 2, 4)
+           └→ 검정력 / pre-post / 규칙 안정성 (rca-d5-verification.md)
 
 각 단계에서 물으세요: "Z에 의해 교란될 수 있는가?" 만약 그렇다면 Z를
 조건화(회귀 / 매칭)하거나 한계를 명시하세요.
@@ -358,6 +396,10 @@ HTML 출력 사양(§ 7b, 그대로 사용할 CSS 블록 포함)은
 | 표면 원인 vs 근본 원인 혼동 | "압력이 높았다" — 그런데 *왜* 압력이 높았는가? | 5-why 깊이 적용; 근본은 직접 변화의 상류 |
 | 보정 없는 다중 검정 | "940 센서에 α=0.05로 47개 유의 요인 발견" | Bonferroni 또는 BH-FDR; SECOM 규모는 ~5% 거짓 양성 예상 |
 | 효과 크기 없는 p-값 보고 | 5pp 계절성을 가진 지표의 0.1pp 이동에 "p < 0.0001" | 항상 p-값을 η² / Cohen's d / lift와 함께 보고 |
+| 발생 원인만 보고 | "레시피 변경이 결함을 유발함 — 종료" (조용히: 모니터가 잡지 못했고, 재발할 것) | **발생(occurrence)** 과 **유출(escape)** 을 모두 보고. `rca-causal-analysis.md` § 4.5 참조. D7이 재발 방지를 위해 유출 원인이 필요합니다. |
+| 검증 기간 없이 D5 성공 선언 | "지난주 결함률이 좋아 보였음, CAPA 종료" | `rca-d5-verification.md` 사용: ≥20 관리 상태 부분군 + 변동 점검 + 검정력 계획된 n |
+| 어골도를 답으로 발표 | 덱에 6가지 화이트보드 사진, 검증 없음 | 어골도는 후보 생성기. 최소 상위 가지에 통계 검정을 붙이세요 (`rca-qualitative.md`). |
+| 반증 없는 5-Why 추측 | 5개의 주장 사슬, 어느 링크에도 검정 없음 | 각 '왜'는 그것을 반박할 통계 검정을 지명해야 합니다. `rca-qualitative.md` 참조. |
 
 ## 9. 성능 치트시트
 

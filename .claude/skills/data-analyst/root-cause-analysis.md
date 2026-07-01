@@ -13,6 +13,7 @@ out alternative explanations.
 
 ## Contents
 
+- § 0: 8D framework context (D0-D8 + CAPA note)
 - When to use vs. `feature-importance.md`
 - Setup — optional dependencies + time-cutoff-split
 - § 1: Change-point detection (PELT, CUSUM)
@@ -25,7 +26,35 @@ out alternative explanations.
 **Extended references (level-1 from `SKILL.md`):**
 - `rca-commonality.md`      — Fisher / BH-FDR / cluster collapse (was § 3)
 - `rca-causal-analysis.md`  — DAG / DiD / dowhy / DOE (was § 4 + § 5)
+- `rca-qualitative.md`      — Pareto / Fishbone / 5-Why with falsification
+- `rca-d5-verification.md`  — did the fix work?
+- `rca-wafer-spatial.md`    — wafer-map / spatial defect patterns
 - `rca-reporting.md`        — Tier 2 template + form guide + HTML (was § 7 + § 7a + § 7b)
+
+## § 0. 8D framework context
+
+In regulated manufacturing (automotive, aerospace, medical devices),
+RCA sits inside the **8D framework** (Ford's original *Eight
+Disciplines*). The Tier 2 report this skill produces is the **D4
+evidence artifact** — a well-run D4 makes D5-D8 straightforward.
+
+| 8D step | What it means | Where this skill helps |
+|---|---|---|
+| **D0** — plan | Emergency response criteria met? | Out of scope |
+| **D1** — team | Cross-functional team formed | Out of scope |
+| **D2** — problem | Quantified problem statement | § 1 CPD confirms the change (metric, time, magnitude) |
+| **D3** — containment | Interim action to protect customer | Out of scope, but D3 status belongs in the Tier 2 header |
+| **D4** — root cause | *This is the RCA.* | Full skill applies: §§ 1–2, `rca-commonality.md`, `rca-causal-analysis.md`, `rca-qualitative.md` |
+| **D5** — verify | Prove the fix works | `rca-d5-verification.md` |
+| **D6** — implement | Roll out permanent action | Out of scope |
+| **D7** — prevent | Update SOP / control plan / FMEA | Report the escape cause (see `rca-causal-analysis.md`) |
+| **D8** — congratulate | Team recognition | Out of scope |
+
+**CAPA** (Corrective and Preventive Action) is the regulated-industries
+name for D5-D7. The record required by FDA / ISO / IATF audits is a
+strict superset of the Tier 2 report — same content, plus a signed audit
+trail. Structure the analysis so a CAPA record can be extracted directly
+from the report.
 
 ## When to Use This File vs. `feature-importance.md`
 
@@ -329,20 +358,29 @@ bias, and temporal mismatch before claiming X caused Y.
 ```
 START: What kind of question?
    │
+   ├── "There's a backlog of failure modes, where to start?"
+   │       └→ Pareto (rca-qualitative.md) — top 20% modes = 80% loss
+   │
+   ├── "What are the possible causes for this failure mode?"
+   │       └→ Fishbone → 5-Why → statistical verify (rca-qualitative.md)
+   │
    ├── "Y has been bad for a while" (steady state)
-   │       └→ SPC + Cp/Cpk + commonality (§§ 2, 3)
+   │       └→ SPC + Cp/Cpk + commonality (§ 2 + rca-commonality.md)
    │
    ├── "Y shifted at time T" (excursion)
    │       └→ CPD to confirm timing (§ 1)
-   │          └→ Commonality on pre-vs-post (§ 3)
-   │             └→ DiD if a known change at T (§ 4)
-   │                └→ Causal refutation (§ 4: dowhy)
+   │          └→ Commonality on pre-vs-post (rca-commonality.md)
+   │             └→ DiD if a known change at T (rca-causal-analysis.md)
+   │                └→ Causal refutation (rca-causal-analysis.md: dowhy)
    │
    ├── "We ran a DOE, what mattered?"
-   │       └→ ANOVA + Tukey HSD + effect size (§ 5)
+   │       └→ ANOVA + Tukey HSD + effect size (rca-causal-analysis.md)
+   │
+   ├── "Defects have (x, y) coordinates — spatial pattern?"
+   │       └→ KDE + Ripley's K + pattern taxonomy (rca-wafer-spatial.md)
    │
    └── "We made a fix — did it work?"
-           └→ DiD pre/post + post-change SPC monitoring (§§ 2, 4)
+           └→ Power / pre-post / rule stability (rca-d5-verification.md)
 
 At every step, ask: "Could this be confounded by Z?" If yes, condition on
 Z (regression / matching) or acknowledge the limitation.
@@ -366,6 +404,10 @@ verbatim CSS block (§ 7b).
 | Surface-cause vs. root-cause confusion | "Pressure was high" — but *why* was pressure high? | Apply 5-why depth; the root is upstream of the proximate change |
 | Multiple testing without correction | "Found 47 significant factors" with α=0.05 across 940 sensors | Bonferroni or BH-FDR; for SECOM-scale, expect ~5% false positives |
 | Reporting p-value without effect size | "p < 0.0001" on a 0.1pp shift in a metric with 5pp seasonality | Always pair p-values with η² / Cohen's d / lift |
+| Reporting only the occurrence cause | "Recipe change caused the defect — closed" (silently: no monitor caught it, will recur) | Report **occurrence** AND **escape** — see `rca-causal-analysis.md` § 4.5. D7 needs the escape to prevent recurrence. |
+| Declaring D5 success without a verification period | "Defect rate looked good last week, closing the CAPA" | Use `rca-d5-verification.md`: ≥20 in-control subgroups + variation check + power-planned n |
+| Publishing Fishbone as the answer | 6-branch whiteboard photo in the deck, no verification | Fishbone is a candidate generator. Attach a statistical test to at least the top branch (`rca-qualitative.md`). |
+| 5-Why speculation without falsification | Chain of 5 assertions, no test for any link | Each "why" must have a named statistical test that would refute it. See `rca-qualitative.md`. |
 
 ## 9. Performance Cheatsheet
 

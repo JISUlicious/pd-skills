@@ -45,23 +45,29 @@ narrative** with evidence:
 - Plot of metric over time with change point marked.
 
 ### 2. Candidate causes (ranked by evidence strength)
-| Candidate | Evidence (commonality / DiD / SHAP) | Confounders to rule out |
-|---|---|---|
-| Recipe v3.2 deploy on T-2 | Lift=4.1, Fisher p=0.0003 | Tool maintenance same day |
-| Chamber 5 (Tool A) | Defect rate 12% vs. baseline 2% | Lot mix shift |
-| New operator shift | Defect rate 8% vs. baseline 2% | Confounded with night shift hardware |
+| Candidate | Occurrence evidence | Escape evidence (why didn't detection catch it?) | Confounders to rule out |
+|---|---|---|---|
+| Recipe v3.2 deploy on T-2 | Lift=4.1, Fisher p=0.0003 | Shewhart X-bar on s406 insensitive to sub-3σ drift | Tool maintenance same day |
+| Chamber 5 (Tool A) | Defect rate 12% vs. baseline 2% | No per-chamber alarm on this metric | Lot mix shift |
+| New operator shift | Defect rate 8% vs. baseline 2% | No shift-level SPC | Confounded with night shift hardware |
 
 ### 3. Causal analysis
 - DiD estimate (recipe v3.2): +5.2pp defect rate, 95% CI [3.1, 7.3]
 - Refutation: random common cause Δ=+0.1, placebo Δ=−0.05 → robust
 - Parallel-trends check: ✓ (plot in appendix)
 
-### 4. Recommended action
-- Roll back recipe v3.2 (highest evidence)
+### 4. Recommended action (D6 corrective + D7 preventive)
+- **D6 corrective:** Roll back recipe v3.2 (highest evidence)
+- **D7 preventive:** Switch s406 SPC chart to EWMA λ=0.2 (closes escape)
 - Increase sampling on Chamber 5 for next 5 lots (secondary signal)
 - Audit night-shift training (lowest priority — confounded)
 
-### 5. What we cannot rule out
+### 5. Verification plan (D5)
+- Power-planned n = 380 wafers post-fix (target Δ = 2pp, α=0.05, power=0.80)
+- Success criteria: Δmean ≥ 2pp, post-σ ≤ pre-σ, 20 in-control subgroups,
+  no WE rule violations. See `rca-d5-verification.md`.
+
+### 6. What we cannot rule out
 - Unobserved supplier-material drift in same week
 - Chamber 5 fixture wear (no instrumentation)
 ```
