@@ -60,7 +60,9 @@ quality static output.
 | Dtypes, PyArrow, memory, vectorization, CoW | `performance-optimization.md` |
 | Plotly (default), Matplotlib & Seaborn (static), dashboards | `visualization.md` |
 | Categorical, Styler, eval, nullable types, pipe | `advanced-pandas.md` |
-| XGBoost, SHAP, permutation importance, interactions, non-linear drivers | `feature-importance.md` |
+| VIF / multicollinearity / mixed-type binding / cluster-representative selection | `collinearity-diagnostics.md` |
+| Feature-importance escalation + diagnostics (skew, null) + leakage + reporting | `feature-importance.md` |
+| XGBoost recipe + SHAP / permutation / gain + cross-method + interactions | `importance-methods.md` |
 | RCA framework + change-point (PELT/CUSUM) + SPC (Shewhart/EWMA/Cp/Cpk) + decision cheatsheet + anti-patterns | `root-cause-analysis.md` |
 | RCA commonality — Fisher / BH-FDR / cluster collapse / frequent-itemset | `rca-commonality.md` |
 | RCA causal inference — DAG / DiD / propensity / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
@@ -72,10 +74,11 @@ quality static output.
 ### Task-Specific File Loading
 
 For **EDA / data profiling**: read `data-loading.md`, `data-exploration.md`, `visualization.md`
+For **VIF / multicollinearity / choosing which correlated feature to keep**: read `collinearity-diagnostics.md`
 For **data cleaning**: read `data-cleaning.md`, `indexing-selection.md`
 For **feature engineering**: read `data-transformation.md`, `time-series.md`
 For **statistical analysis**: read `statistical-analysis.md`, `visualization.md`
-For **feature importance / non-linear drivers**: read `feature-importance.md`, `statistical-analysis.md`
+For **feature importance / non-linear drivers**: read `feature-importance.md`, `importance-methods.md`, `statistical-analysis.md`
 For **RCA — change-point / SPC / anti-patterns / end-to-end workflow**: read `root-cause-analysis.md`
 For **RCA commonality (which sensors / factors shifted)**: read `root-cause-analysis.md`, `rca-commonality.md`
 For **RCA causal analysis or DOE**: read `rca-causal-analysis.md`
@@ -96,7 +99,7 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 After completing **Explore**, verify every item in the EDA checklist at the
 end of `data-exploration.md`. Report any unchecked items to the user.
 **VIF / multicollinearity inspection is part of Explore, not a deferred
-modeling step** — see `data-exploration.md` § 6 for the integrated audit.
+modeling step** — see `collinearity-diagnostics.md` for the integrated audit.
 
 ## Pre-Modeling Diagnostics (mandatory)
 
@@ -121,7 +124,7 @@ when the dataset has both types.
 When VIF is severe and the downstream method can't tolerate it, use
 `select_cluster_representative()` (priority-ordered: aggregate → summary
 name → score-by-context → completeness → variance → ambiguous-flag) to
-pick which feature to keep. See `data-exploration.md` § 6.
+pick which feature to keep. See `collinearity-diagnostics.md`.
 
 ### 2. Null-handling audit (dtype-aware)
 

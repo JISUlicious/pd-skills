@@ -24,7 +24,7 @@
 멤버를 8개의 별도 발견으로 보고합니다** — 보고서를 읽는 엔지니어에게는
 무용합니다.
 
-`data-exploration.md` § 6의 프레임워크(5-우선순위
+`collinearity-diagnostics.md`의 프레임워크(5-우선순위
 `select_cluster_representative()` 헬퍼)를 사용하되, 한 가지 결정적 오버라이드를
 적용합니다:
 

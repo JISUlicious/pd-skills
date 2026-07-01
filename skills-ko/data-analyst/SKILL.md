@@ -58,7 +58,9 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 | Dtype, PyArrow, 메모리, 벡터화, CoW | `performance-optimization.md` |
 | Plotly(기본), Matplotlib & Seaborn(정적), 대시보드 | `visualization.md` |
 | Categorical, Styler, eval, nullable 타입, pipe | `advanced-pandas.md` |
-| XGBoost, SHAP, 순열 중요도, 상호작용, 비선형 드라이버 | `feature-importance.md` |
+| VIF / 다중공선성 / 혼합 타입 결합 / 클러스터 대표 선택 | `collinearity-diagnostics.md` |
+| 특성 중요도 에스컬레이션 + 진단(왜도, 결측) + 누수 + 보고 | `feature-importance.md` |
+| XGBoost 레시피 + SHAP / 순열 / gain + 메서드 간 점검 + 상호작용 | `importance-methods.md` |
 | RCA 프레임워크 + 변화점(PELT/CUSUM) + SPC(Shewhart/EWMA/Cp/Cpk) + 의사결정 치트시트 + 안티패턴 | `root-cause-analysis.md` |
 | RCA 공통성 — Fisher / BH-FDR / 클러스터 축소 / 빈발 항목집합 | `rca-commonality.md` |
 | RCA 인과 추론 — DAG / DiD / 성향 / dowhy / DOE / ANOVA | `rca-causal-analysis.md` |
@@ -70,10 +72,11 @@ print(f"pandas {pd.__version__}, numpy {np.__version__}")
 ### 작업별 파일 로딩
 
 **EDA / 데이터 프로파일링**: `data-loading.md`, `data-exploration.md`, `visualization.md`
+**VIF / 다중공선성 / 상관된 피처 중 무엇을 유지할지**: `collinearity-diagnostics.md`
 **데이터 정제**: `data-cleaning.md`, `indexing-selection.md`
 **피처 엔지니어링**: `data-transformation.md`, `time-series.md`
 **통계 분석**: `statistical-analysis.md`, `visualization.md`
-**피처 중요도 / 비선형 드라이버**: `feature-importance.md`, `statistical-analysis.md`
+**피처 중요도 / 비선형 드라이버**: `feature-importance.md`, `importance-methods.md`, `statistical-analysis.md`
 **RCA — 변화점 / SPC / 안티패턴 / 종단 간 워크플로**: `root-cause-analysis.md`
 **RCA 공통성 (어떤 센서 / 요인이 이동했는가)**: `root-cause-analysis.md`, `rca-commonality.md`
 **RCA 인과 분석 또는 DOE**: `rca-causal-analysis.md`
@@ -94,7 +97,7 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 **Explore** 단계 완료 후 `data-exploration.md` 끝의 EDA 체크리스트의
 모든 항목을 검증합니다. 확인되지 않은 항목이 있으면 사용자에게
 보고합니다. **VIF / 다중공선성 점검은 Explore 단계의 일부이며 모델링으로
-미루는 단계가 아닙니다** — 통합 감사 절차는 `data-exploration.md` § 6 참조.
+미루는 단계가 아닙니다** — 통합 감사 절차는 `collinearity-diagnostics.md` 참조.
 
 ## 모델링 전 진단 (필수)
 
@@ -118,7 +121,7 @@ Load → Explore → Clean → Transform → Analyze → Visualize → Interpret
 
 VIF가 심각하고 후속 메서드가 이를 견딜 수 없을 때, `select_cluster_representative()`
 (우선순위: 집계 → 요약 이름 → 컨텍스트별 점수 → 완전성 → 분산 →
-모호 플래그)로 어떤 피처를 유지할지 선택합니다. `data-exploration.md` § 6 참조.
+모호 플래그)로 어떤 피처를 유지할지 선택합니다. `collinearity-diagnostics.md` 참조.
 
 ### 2. 결측 처리 감사 (dtype 인식)
 

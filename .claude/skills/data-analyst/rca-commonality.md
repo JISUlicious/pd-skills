@@ -24,7 +24,7 @@ pressure) are nearly perfectly correlated. **Without collapsing first,
 your commonality table reports 8 members of one physical cluster as 8
 separate findings** — useless for an engineer reading the report.
 
-Use the framework in `data-exploration.md` § 6 (the 5-priority
+Use the framework in `collinearity-diagnostics.md` (the 5-priority
 `select_cluster_representative()` helper), with one critical override:
 
 > **Priority 3 override for RCA:** rank cluster members by **|shift
