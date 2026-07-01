@@ -139,18 +139,30 @@ estimate = model.estimate_effect(
 print(f"Causal effect estimate: {estimate.value:+.4f}")
 
 # Refutation: would the estimate survive these challenges?
+# NOTE: each refuter has a DIFFERENT pass target — don't apply one rule to all.
 refute_random  = model.refute_estimate(identified, estimate, "random_common_cause")
 refute_placebo = model.refute_estimate(identified, estimate, "placebo_treatment_refuter")
 refute_subset  = model.refute_estimate(identified, estimate, "data_subset_refuter")
-print("Refutation summary:")
-print(f"  Random common cause:  Δ = {refute_random.new_effect - estimate.value:+.4f}")
-print(f"  Placebo treatment:    Δ = {refute_placebo.new_effect - estimate.value:+.4f}")
-print(f"  Data subset:          Δ = {refute_subset.new_effect - estimate.value:+.4f}")
+est = estimate.value
+print("Refutation summary (new_effect vs. its pass target):")
+print(f"  Random common cause:  new = {refute_random.new_effect:+.4f}   (robust ≈ {est:+.4f})")
+print(f"  Placebo treatment:    new = {refute_placebo.new_effect:+.4f}   (robust ≈  0.0000)")
+print(f"  Data subset:          new = {refute_subset.new_effect:+.4f}   (robust ≈ {est:+.4f})")
 ```
 
-A robust causal estimate survives all three refutations with little
-change. If the placebo refuter shows a large effect (it shouldn't, by
-construction), the original estimate is suspect.
+A robust causal estimate behaves differently under each refuter, so a
+single "stays the same" rule is wrong:
+
+- **Random common cause** and **data subset** should leave `new_effect`
+  ≈ the original estimate — adding an irrelevant confounder or dropping
+  a random subset shouldn't move a real effect.
+- **Placebo treatment** replaces the treatment with a random variable,
+  so `new_effect` should collapse to ≈ **0** — a fake cause has no
+  effect. If the placebo *reproduces* the original effect, the estimate
+  is capturing noise or confounding, not causation, and is **suspect**.
+
+Each refuter reports a `p_value` for its own null; use that rather than
+eyeballing the deltas when the estimates are noisy.
 
 ## § 4.5: Occurrence cause vs escape cause
 

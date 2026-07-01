@@ -5,12 +5,15 @@ description: >
   time series, statistics, and visualization — plus specialized workflows
   for root-cause analysis, defect/yield excursion investigation, change-point
   detection, SPC (Shewhart / EWMA / Cp / Cpk), XGBoost/SHAP feature importance,
-  multicollinearity (VIF) audits, and causal inference (DiD, propensity
-  matching, dowhy). Use this skill whenever the user mentions dataframes,
+  multicollinearity (VIF) audits, causal inference (DiD, propensity
+  matching, dowhy), designed experiments (DOE / ANOVA), qualitative RCA
+  (Pareto / Fishbone / 5-Why), wafer-map / spatial defect patterns, and
+  8D / CAPA reporting. Use this skill whenever the user mentions dataframes,
   CSV/Parquet/Excel analysis, feature importance, driver analysis, yield or
   defect investigations, process excursions, change-points, control charts,
-  or any Python data-science task — even when they don't explicitly say
-  "pandas" or "analysis".
+  wafer maps, Pareto or Fishbone or 5-Why, DOE, 8D, or any Python
+  data-science task — even when they don't explicitly say "pandas" or
+  "analysis".
 ---
 
 # Expert Data Analyst — pandas >= 2.3

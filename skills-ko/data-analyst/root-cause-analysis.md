@@ -239,13 +239,21 @@ def shewhart_chart(values, subgroup_size=5):
     lcl_r = D3 * rbar
     sigma = (ucl_x - cl_x) / 3                  # 차트 한계로부터 함의된 σ
 
-    # X̄에 대한 Western Electric 룰
+    # X̄에 대한 Western Electric 룰. WE 존 규칙은 *한쪽 방향*입니다 —
+    # "3개 중 2개가 2σ 초과"는 같은 쪽을 의미합니다. np.abs()를 쓰면
+    # +2σ / −2σ 혼합에서도 발동하는데, 이는 WE 위반이 아닙니다. 또한
+    # xbar는 NumPy 배열이므로 .rolling() 전에 pd.Series로 감싸야 합니다.
+    dev    = pd.Series(xbar - cl_x)
+    upper2 = (dev >  2 * sigma); lower2 = (dev < -2 * sigma)   # 2σ 초과, 쪽별
+    upper1 = (dev >      sigma); lower1 = (dev <     -sigma)   # 1σ 초과, 쪽별
     flags = pd.DataFrame({"xbar": xbar})
-    flags["rule_1"] = np.abs(xbar - cl_x) > 3 * sigma                       # 1점 > 3σ
-    flags["rule_2"] = (np.abs(xbar - cl_x) > 2 * sigma).rolling(3).sum() >= 2  # 3개 중 2개 > 2σ
-    flags["rule_3"] = (np.abs(xbar - cl_x) > sigma).rolling(5).sum() >= 4      # 5개 중 4개 > 1σ
-    flags["rule_4"] = pd.Series((xbar > cl_x).astype(int)).rolling(8).sum() \
-                        .isin([0, 8])                                          # 8연속 같은 쪽
+    flags["rule_1"] = (dev.abs() > 3 * sigma)                                   # 1점 > 3σ
+    flags["rule_2"] = ((upper2.rolling(3).sum() >= 2) |
+                       (lower2.rolling(3).sum() >= 2))                          # 3개 중 2개 > 2σ, 같은 쪽
+    flags["rule_3"] = ((upper1.rolling(5).sum() >= 4) |
+                       (lower1.rolling(5).sum() >= 4))                          # 5개 중 4개 > 1σ, 같은 쪽
+    flags["rule_4"] = (pd.Series((xbar > cl_x).astype(int)).rolling(8).sum()
+                         .isin([0, 8]))                                         # 8연속 같은 쪽
     flags["any_violation"] = flags[["rule_1","rule_2","rule_3","rule_4"]].any(axis=1)
     return {"cl_x": cl_x, "ucl_x": ucl_x, "lcl_x": lcl_x,
             "cl_r": rbar, "ucl_r": ucl_r, "lcl_r": lcl_r,

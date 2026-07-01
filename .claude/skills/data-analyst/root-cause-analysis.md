@@ -245,13 +245,21 @@ def shewhart_chart(values, subgroup_size=5):
     lcl_r = D3 * rbar
     sigma = (ucl_x - cl_x) / 3                  # implied σ from chart limits
 
-    # Western Electric runs rules on X̄
+    # Western Electric runs rules on X̄. WE zone rules are *one-sided* —
+    # "2 of 3 beyond 2σ" means on the SAME side. Using np.abs() would fire
+    # on a +2σ / −2σ mix, which is not a WE violation. Also: xbar is a
+    # NumPy array, so wrap zone membership in pd.Series before .rolling().
+    dev    = pd.Series(xbar - cl_x)
+    upper2 = (dev >  2 * sigma); lower2 = (dev < -2 * sigma)   # beyond 2σ, per side
+    upper1 = (dev >      sigma); lower1 = (dev <     -sigma)   # beyond 1σ, per side
     flags = pd.DataFrame({"xbar": xbar})
-    flags["rule_1"] = np.abs(xbar - cl_x) > 3 * sigma                       # 1 point > 3σ
-    flags["rule_2"] = (np.abs(xbar - cl_x) > 2 * sigma).rolling(3).sum() >= 2  # 2 of 3 > 2σ
-    flags["rule_3"] = (np.abs(xbar - cl_x) > sigma).rolling(5).sum() >= 4      # 4 of 5 > 1σ
-    flags["rule_4"] = pd.Series((xbar > cl_x).astype(int)).rolling(8).sum() \
-                        .isin([0, 8])                                          # 8 in a row same side
+    flags["rule_1"] = (dev.abs() > 3 * sigma)                                   # 1 point > 3σ
+    flags["rule_2"] = ((upper2.rolling(3).sum() >= 2) |
+                       (lower2.rolling(3).sum() >= 2))                          # 2 of 3 > 2σ, same side
+    flags["rule_3"] = ((upper1.rolling(5).sum() >= 4) |
+                       (lower1.rolling(5).sum() >= 4))                          # 4 of 5 > 1σ, same side
+    flags["rule_4"] = (pd.Series((xbar > cl_x).astype(int)).rolling(8).sum()
+                         .isin([0, 8]))                                         # 8 in a row same side
     flags["any_violation"] = flags[["rule_1","rule_2","rule_3","rule_4"]].any(axis=1)
     return {"cl_x": cl_x, "ucl_x": ucl_x, "lcl_x": lcl_x,
             "cl_r": rbar, "ucl_r": ucl_r, "lcl_r": lcl_r,

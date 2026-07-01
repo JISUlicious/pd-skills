@@ -138,18 +138,30 @@ estimate = model.estimate_effect(
 print(f"Causal effect estimate: {estimate.value:+.4f}")
 
 # 반박: 추정치가 다음 도전을 견딜 수 있는가?
+# 주의: 각 반박기는 통과 기준이 서로 다릅니다 — 하나의 규칙을 모두에 적용하지 마세요.
 refute_random  = model.refute_estimate(identified, estimate, "random_common_cause")
 refute_placebo = model.refute_estimate(identified, estimate, "placebo_treatment_refuter")
 refute_subset  = model.refute_estimate(identified, estimate, "data_subset_refuter")
-print("Refutation summary:")
-print(f"  Random common cause:  Δ = {refute_random.new_effect - estimate.value:+.4f}")
-print(f"  Placebo treatment:    Δ = {refute_placebo.new_effect - estimate.value:+.4f}")
-print(f"  Data subset:          Δ = {refute_subset.new_effect - estimate.value:+.4f}")
+est = estimate.value
+print("Refutation summary (new_effect vs. 통과 기준):")
+print(f"  Random common cause:  new = {refute_random.new_effect:+.4f}   (강건 ≈ {est:+.4f})")
+print(f"  Placebo treatment:    new = {refute_placebo.new_effect:+.4f}   (강건 ≈  0.0000)")
+print(f"  Data subset:          new = {refute_subset.new_effect:+.4f}   (강건 ≈ {est:+.4f})")
 ```
 
-강건한 인과 추정치는 세 반박을 거치고도 큰 변화 없이 유지됩니다.
-플라시보 반박이 큰 효과를 보인다면(구조상 그래서는 안 되므로), 원래
-추정치를 의심해야 합니다.
+강건한 인과 추정치는 각 반박기에 대해 다르게 행동하므로, "그대로
+유지된다"는 단일 규칙은 틀립니다:
+
+- **무작위 공통원인**과 **데이터 부분집합**은 `new_effect`가 원래 추정치
+  ≈ 값으로 유지되어야 합니다 — 무관한 교란변수를 추가하거나 무작위
+  부분집합을 제거해도 진짜 효과는 움직이지 않아야 합니다.
+- **플라시보 처리**는 처리를 무작위 변수로 대체하므로 `new_effect`가
+  ≈ **0**으로 붕괴되어야 합니다 — 가짜 원인은 효과가 없습니다. 플라시보가
+  원래 효과를 *재현*한다면, 추정치는 인과가 아니라 노이즈나 교란을
+  포착하고 있는 것이며 **의심스럽습니다**.
+
+추정치가 노이즈가 많을 때는 델타를 눈으로 보는 대신 각 반박기가 보고하는
+`p_value`를 자체 귀무가설에 대해 사용하세요.
 
 ## § 4.5: 발생 원인 vs 유출 원인
 
