@@ -16,6 +16,19 @@ correlated features do I keep", mixed numeric+categorical redundancy, or
 the Pre-Modeling collinearity audit that `SKILL.md` requires. Called from
 `data-exploration.md` Step 6 and `rca-commonality.md`.
 
+**To run the audit rather than read about it**, use the shipped probes —
+they implement everything below and already guard the degenerate cases:
+
+```bash
+python scripts/collinearity_probe.py <data> --target <col>      # all three layers
+python scripts/cluster_representative.py <data> --target <col>  # resolve a cluster
+```
+
+The code in this file is the reference implementation and the explanation of
+*why* each layer exists. Reach for it when you need to adapt the method —
+a custom score function, a different clustering rule, embedding the check
+inside a larger pipeline. For the standard audit, run the probe.
+
 ### Multicollinearity audit (VIF) — run on every dataset
 
 VIF (Variance Inflation Factor) is **not optional** and **not deferred to

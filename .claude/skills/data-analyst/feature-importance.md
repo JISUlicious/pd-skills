@@ -244,6 +244,12 @@ audit = null_audit(X, y)
 print(audit.to_string(index=False))
 ```
 
+To run this audit rather than re-implement it:
+`python scripts/null_audit_probe.py <data> --target <col>` — same measure
+selection, plus the per-column action from the table below and a sample-size
+scaled threshold. The leakage check further down ships as
+`scripts/leakage_probe.py`.
+
 `miss_target_assoc` is Spearman ρ for numeric targets, point-biserial r
 for binary, and Cramér's V for multiclass. All three live on a comparable
 [-1, 1] / [0, 1] scale, so the same 0.05 threshold below applies.

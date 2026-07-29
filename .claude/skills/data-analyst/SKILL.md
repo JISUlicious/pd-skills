@@ -14,6 +14,14 @@ description: >
   wafer maps, Pareto or Fishbone or 5-Why, DOE, 8D, or any Python
   data-science task — even when they don't explicitly say "pandas" or
   "analysis".
+metadata:
+  verify:
+    - "All four Pre-Modeling Diagnostics ran before any modeling or driver claim (scripts/premodel_audit.py, or the equivalent inline)"
+    - "Row counts in vs out are reported for any filtering, join, or dropna"
+    - "Multicollinearity was audited and any VIF > 10 is either resolved or disclosed alongside the coefficients it affects"
+    - "Null handling is per-column with a stated reason; no blanket dropna() on a dataset with informative missingness"
+    - "Driver rankings from a linear method are cross-checked against SHAP or permutation importance when R² < 0.4 or the methods disagree"
+    - "Every reported effect carries its sample size and uncertainty"
 ---
 
 # Expert Data Analyst — pandas >= 2.3
@@ -49,6 +57,7 @@ quality static output.
 
 | When working on… | Read this file |
 |---|---|
+| Running the mandatory diagnostics — probe usage, exit codes, caveats | `scripts/README.md` |
 | Loading CSV, Excel, JSON, Parquet, SQL, HDF5 | `data-loading.md` |
 | EDA, profiling, summary stats, data overview | `data-exploration.md` |
 | Missing values, deduplication, type conversion | `data-cleaning.md` |
@@ -107,6 +116,25 @@ These audits run during **Explore**, before any modeling, driver analysis,
 or correlation interpretation. Each catches a class of silent failure that
 otherwise propagates into wrong conclusions. **Skipping any of them is the
 most common EDA failure mode.**
+
+**Run them, don't just cite them.** The four diagnostics ship as executable
+probes in `scripts/` — start there rather than re-implementing the checks
+inline, because the probes already handle the degenerate cases that make a
+hand-rolled version report confident nonsense (rank-deficient VIF, Cramér's V
+saturating on a ranked continuous target, 99%-null columns posting perfect
+associations off a dozen rows).
+
+```bash
+python scripts/premodel_audit.py <data> --target <col>     # all four, one verdict
+python scripts/collinearity_probe.py <data> --target <col> # or one at a time
+```
+
+Exit 0 = clear, 1 = a finding to act on, 2 = the probe could not run. Add
+`--json` when you want to consume the result rather than read it. Read
+`scripts/README.md` for what each probe asserts, the shared flags, and the
+caveats that change how the output should be read (ID columns, structural
+absence, n/p ratio). The reference files below explain the *methods*; the
+probes are the authoritative implementation of them.
 
 ### 1. Collinearity audit — three layers
 

@@ -239,6 +239,12 @@ audit = null_audit(X, y)
 print(audit.to_string(index=False))
 ```
 
+이 감사를 다시 구현하는 대신 실행하려면:
+`python scripts/null_audit_probe.py <데이터> --target <칼럼>` — 동일한 측도
+선택에 더해 아래 표의 칼럼별 조치와 표본 크기에 맞춰 조정된 임계값을
+제공합니다. 아래쪽의 누출 검사는 `scripts/leakage_probe.py`로 포함되어
+있습니다.
+
 `miss_target_assoc`는 수치형 타겟에는 Spearman ρ, 이진형에는 점이연 r,
 다클래스에는 Cramér's V입니다. 세 가지 모두 [-1, 1] / [0, 1] 비교 가능
 척도에 있으므로 아래의 동일한 0.05 임계값이 적용됩니다.
